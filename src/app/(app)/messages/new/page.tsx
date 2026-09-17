@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, Users } from "lucide-react";
 import { requireProfile } from "@/lib/data/session";
 import { searchProfiles } from "@/lib/data/profiles";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -31,6 +31,14 @@ export default async function NewMessagePage(props: PageProps<"/messages/new">) 
           />
         </label>
       </form>
+      {!q && (
+        <Link href="/messages/new/group" className="flex items-center gap-3 border-b border-line px-4 py-3 font-semibold text-brand hover:bg-surface-2/60">
+          <span className="flex size-11 items-center justify-center rounded-full bg-brand-soft">
+            <Users className="size-5" />
+          </span>
+          New group
+        </Link>
+      )}
       <ul className="divide-y divide-line">
         {people.length === 0 && (
           <li className="px-4 py-10 text-center text-sm text-ink-muted">No one found.</li>

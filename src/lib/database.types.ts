@@ -418,22 +418,31 @@ export type Database = {
       conversations: {
         Row: {
           id: string;
-          user_a: string;
-          user_b: string;
+          user_a: string | null; // DMs only
+          user_b: string | null; // DMs only
+          is_group: boolean;
+          title: string | null; // groups only
+          created_by: string | null; // groups only
           created_at: string;
           last_message_at: string | null;
         };
         Insert: {
           id?: string;
-          user_a: string;
-          user_b: string;
+          user_a?: string | null;
+          user_b?: string | null;
+          is_group?: boolean;
+          title?: string | null;
+          created_by?: string | null;
           created_at?: string;
           last_message_at?: string | null;
         };
         Update: {
           id?: string;
-          user_a?: string;
-          user_b?: string;
+          user_a?: string | null;
+          user_b?: string | null;
+          is_group?: boolean;
+          title?: string | null;
+          created_by?: string | null;
           created_at?: string;
           last_message_at?: string | null;
         };
@@ -448,6 +457,41 @@ export type Database = {
           {
             foreignKeyName: "conversations_user_b_fkey";
             columns: ["user_b"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "conversations_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      conversation_members: {
+        Row: { conversation_id: string; user_id: string; added_by: string | null; joined_at: string };
+        Insert: { conversation_id: string; user_id: string; added_by?: string | null; joined_at?: string };
+        Update: { conversation_id?: string; user_id?: string; added_by?: string | null; joined_at?: string };
+        Relationships: [
+          {
+            foreignKeyName: "conversation_members_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "conversation_members_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "conversation_members_added_by_fkey";
+            columns: ["added_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];
@@ -801,6 +845,14 @@ export type Database = {
         Args: Record<string, never>;
         Returns: { conversation_id: string; unread: number }[];
       };
+      can_read_message: { Args: { p_conversation_id: string; p_sender_id: string }; Returns: boolean };
+      group_owner: { Args: { p_conversation_id: string }; Returns: string | null };
+      create_group_conversation: { Args: { p_title: string; p_member_ids: string[] }; Returns: string };
+      add_group_members: { Args: { p_conversation_id: string; p_member_ids: string[] }; Returns: undefined };
+      leave_group: { Args: { p_conversation_id: string }; Returns: undefined };
+      remove_group_member: { Args: { p_conversation_id: string; p_user_id: string }; Returns: undefined };
+      rename_group: { Args: { p_conversation_id: string; p_title: string }; Returns: undefined };
+      delete_empty_groups: { Args: Record<string, never>; Returns: number };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

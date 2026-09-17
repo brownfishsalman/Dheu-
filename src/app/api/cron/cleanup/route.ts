@@ -12,7 +12,7 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const report = { posts: 0, postImages: 0, stories: 0, chatPhotos: 0, voiceMessages: 0, errors: [] as string[] };
+  const report = { posts: 0, postImages: 0, stories: 0, chatPhotos: 0, voiceMessages: 0, emptyGroups: 0, errors: [] as string[] };
 
   // ---- expired posts -------------------------------------------------
   const { data: posts, error: pErr } = await admin
@@ -93,6 +93,11 @@ export async function GET(request: Request) {
     if (error) report.errors.push(`voice rows: ${error.message}`);
     else report.voiceMessages = voices.length;
   }
+
+  // ---- groups everyone has left (once their media files are gone) ---------
+  const { data: gone, error: gErr } = await admin.rpc("delete_empty_groups");
+  if (gErr) report.errors.push(`empty groups: ${gErr.message}`);
+  else report.emptyGroups = gone ?? 0;
 
   // ---- old notifications (keep the activity page light) -----------------
   const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();

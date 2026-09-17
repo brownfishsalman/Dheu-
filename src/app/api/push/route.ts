@@ -63,13 +63,23 @@ export async function POST(request: Request) {
     payload = { title: "Dheu", body: m.body, url: m.url, tag: `notif-${n.type}-${n.actor_id}` };
   } else if (table === "messages") {
     const msg = record as MessageRow;
-    const { data: conv } = await admin.from("conversations").select("user_a, user_b").eq("id", msg.conversation_id).maybeSingle();
+    const [{ data: conv }, { data: blocks }] = await Promise.all([
+      admin
+        .from("conversations")
+        .select("is_group, title, members:conversation_members(user_id)")
+        .eq("id", msg.conversation_id)
+        .maybeSingle(),
+      // In a group, people on either side of a block with the sender can't see the message — no push either.
+      admin.from("blocks").select("blocker_id, blocked_id").or(`blocker_id.eq.${msg.sender_id},blocked_id.eq.${msg.sender_id}`),
+    ]);
     if (!conv) return NextResponse.json({ ok: true, skipped: "no conversation" });
-    const other = conv.user_a === msg.sender_id ? conv.user_b : conv.user_a;
+    const blocked = new Set((blocks ?? []).flatMap((b) => [b.blocker_id, b.blocked_id]));
+    recipients = conv.members.map((m) => m.user_id).filter((id) => id !== msg.sender_id && !(conv.is_group && blocked.has(id)));
     const sender = await usernameOf(msg.sender_id);
-    recipients = [other];
     const text = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
-    payload = { title: sender, body: text, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` };
+    payload = conv.is_group
+      ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` }
+      : { title: sender, body: text, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` };
   } else if (table === "announcements") {
     const a = record as AnnouncementRow;
     const { data: subs } = await admin.from("push_subscriptions").select("user_id");

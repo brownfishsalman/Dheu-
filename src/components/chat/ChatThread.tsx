@@ -9,6 +9,7 @@ import { publicUrl } from "@/lib/storage";
 import { processImage, POST_MAX, ACCEPT_ATTR, newImagePath, type ProcessedImage } from "@/lib/images";
 import { newAudioPath, baseMime, formatDuration } from "@/lib/audio";
 import { Avatar } from "@/components/ui/Avatar";
+import { GroupAvatar } from "@/components/chat/GroupAvatar";
 import { VoiceNote, useVoiceRecorder } from "@/components/chat/VoiceNote";
 import { loadOlderMessages } from "@/app/(app)/messages/actions";
 import type { ChatMessage, ChatPeer, ReplyPreview } from "@/lib/data/chat";
@@ -18,10 +19,14 @@ import { MESSAGE_PAGE, CHAT_PHOTO_DAYS, CHAT_VOICE_DAYS, VOICE_MAX_SECONDS } fro
 type Props = {
   conversationId: string;
   meId: string;
-  peer: ChatPeer;
+  peer: ChatPeer | null; // the other person in a DM; null for groups
+  group: { title: string; memberCount: number } | null;
+  members: ChatPeer[]; // everyone whose name may appear (current members + people who left)
   initialMessages: ChatMessage[];
   blocked: BlockStatus;
 };
+
+const FORMER = "Former member";
 
 function sameDay(a: string, b: string) {
   return new Date(a).toDateString() === new Date(b).toDateString();
@@ -60,8 +65,15 @@ function toReplyPreview(m: ChatMessage): ReplyPreview {
 }
 const REPLY_SELECT = "id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at";
 
-export function ChatThread({ conversationId, meId, peer, initialMessages, blocked }: Props) {
+export function ChatThread({ conversationId, meId, peer, group, members, initialMessages, blocked }: Props) {
+  const isGroup = group !== null;
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  // Names and avatars by user id; grows if someone unknown (e.g. just added) posts.
+  const [people, setPeople] = useState(() => new Map(members.map((p) => [p.id, p])));
+  const nameOf = useCallback(
+    (id: string) => (id === meId ? "You" : (people.get(id)?.full_name ?? FORMER)),
+    [meId, people],
+  );
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<ProcessedImage | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -88,11 +100,15 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
     markRead();
   }, [markRead]);
 
-  // Latest messages, readable from inside the realtime callback
+  // Latest messages / people, readable from inside the realtime callback
   const messagesRef = useRef(messages);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+  const peopleRef = useRef(people);
+  useEffect(() => {
+    peopleRef.current = people;
+  }, [people]);
 
   // Realtime: new messages in this conversation
   useEffect(() => {
@@ -104,6 +120,14 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
       { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
       async (payload) => {
         const row = payload.new as Omit<ChatMessage, "story" | "reply">;
+        if (row.sender_id !== meId && !peopleRef.current.has(row.sender_id)) {
+          const { data: p } = await supabase
+            .from("profiles")
+            .select("id, username, full_name, avatar_path")
+            .eq("id", row.sender_id)
+            .maybeSingle();
+          if (p) setPeople((prev) => new Map(prev).set(p.id, p));
+        }
         let story: ChatMessage["story"] = null;
         if (row.story_id) {
           const { data } = await supabase.from("stories").select("image_path, author_id").eq("id", row.story_id).maybeSingle();
@@ -261,18 +285,32 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
 
         {messages.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-16 text-center">
-            <Avatar path={peer.avatar_path} name={peer.full_name} size={72} />
-            <p className="font-semibold">{peer.full_name}</p>
-            <p className="text-sm text-ink-muted">@{peer.username} · Say hi 👋</p>
+            {group ? (
+              <>
+                <GroupAvatar members={members.filter((p) => p.id !== meId)} size={72} />
+                <p className="font-semibold">{group.title}</p>
+                <p className="text-sm text-ink-muted">{group.memberCount} members · Say hi 👋</p>
+              </>
+            ) : peer ? (
+              <>
+                <Avatar path={peer.avatar_path} name={peer.full_name} size={72} />
+                <p className="font-semibold">{peer.full_name}</p>
+                <p className="text-sm text-ink-muted">@{peer.username} · Say hi 👋</p>
+              </>
+            ) : null}
           </div>
         )}
 
         {messages.map((m, i) => {
           const mine = m.sender_id === meId;
           const prev = messages[i - 1];
+          const next = messages[i + 1];
           const showDay = !prev || !sameDay(prev.created_at, m.created_at);
           const grouped = prev && prev.sender_id === m.sender_id && !showDay &&
             new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60_000;
+          // In groups: name above the first bubble of a run, avatar beside the last.
+          const endOfRun = !next || next.sender_id !== m.sender_id || !sameDay(m.created_at, next.created_at) ||
+            new Date(next.created_at).getTime() - new Date(m.created_at).getTime() >= 5 * 60_000;
           return (
             <div key={m.id}>
               {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
@@ -280,8 +318,8 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
                 m={m}
                 mine={mine}
                 grouped={grouped}
-                peer={peer}
-                meId={meId}
+                sender={isGroup && !mine ? { name: nameOf(m.sender_id), avatar: people.get(m.sender_id) ?? null, showName: !grouped, showAvatar: endOfRun } : null}
+                nameOf={nameOf}
                 onReply={canSend ? () => startReply(m) : undefined}
                 onOpenImage={setLightbox}
                 scrollToReply={(id) => byId.has(id) && document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
@@ -302,7 +340,7 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
             <div className="flex items-center gap-2 border-l-4 border-brand bg-surface-2/60 px-3 py-2 text-sm">
               <Reply className="size-4 shrink-0 text-brand" />
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-brand">{replyTo.sender_id === meId ? "You" : peer.full_name}</p>
+                <p className="text-xs font-semibold text-brand">{nameOf(replyTo.sender_id)}</p>
                 <p className="truncate text-ink-muted">{replyLabel(replyTo)}</p>
               </div>
               <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" className="rounded-full p-1 text-ink-muted hover:bg-surface-2">
@@ -419,12 +457,14 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
 }
 
 // One message. Swipe horizontally (touch) or hover → reply icon (mouse) to reply.
+type SenderInfo = { name: string; avatar: ChatPeer | null; showName: boolean; showAvatar: boolean };
+
 function Bubble({
   m,
   mine,
   grouped,
-  peer,
-  meId,
+  sender,
+  nameOf,
   onReply,
   onOpenImage,
   scrollToReply,
@@ -432,8 +472,8 @@ function Bubble({
   m: ChatMessage;
   mine: boolean;
   grouped: boolean;
-  peer: ChatPeer;
-  meId: string;
+  sender: SenderInfo | null; // set for other people's messages in a group
+  nameOf: (id: string) => string;
   onReply?: () => void;
   onOpenImage: (src: string) => void;
   scrollToReply: (id: string) => void;
@@ -500,11 +540,21 @@ function Bubble({
         </button>
       )}
 
+      {/* Group chats: the sender's avatar beside the last bubble of their run (a spacer otherwise) */}
+      {sender && (
+        <span className="mr-2 w-7 shrink-0 self-end">
+          {sender.showAvatar && (
+            <Avatar path={sender.avatar?.avatar_path} name={sender.avatar?.full_name ?? sender.name} size={28} />
+          )}
+        </span>
+      )}
+
       <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+        {sender?.showName && <span className="mb-0.5 ml-1 text-xs font-semibold text-ink-muted">{sender.name}</span>}
         {m.story_id && (
           <div className={`mb-1 flex items-end gap-2 text-xs text-ink-faint ${mine ? "flex-row-reverse" : ""}`}>
             {storySrc ? (
-              <Link href={m.story && m.story.author_id === peer.id ? `/stories/${peer.id}` : `/stories/${meId}`} className="block h-20 w-12 overflow-hidden rounded-lg border border-line bg-surface-2">
+              <Link href={`/stories/${m.story!.author_id}`} className="block h-20 w-12 overflow-hidden rounded-lg border border-line bg-surface-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={storySrc} alt="" className="h-full w-full object-cover" />
               </Link>
@@ -528,7 +578,7 @@ function Bubble({
               }`}
             >
               <span className={`block font-semibold ${mine ? "opacity-90" : "text-brand"}`}>
-                {m.reply.sender_id === meId ? "You" : peer.full_name}
+                {nameOf(m.reply.sender_id)}
               </span>
               <span className="line-clamp-2 opacity-80">{replyLabel(m.reply)}</span>
             </button>

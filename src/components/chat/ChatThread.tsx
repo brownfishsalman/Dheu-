@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Loader2, ImagePlus, X, Reply, Clock } from "lucide-react";
+import { Send, Loader2, ImagePlus, X, Reply, Clock, Mic, Square, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ensureRealtimeAuth } from "@/lib/supabase/realtime";
 import { publicUrl } from "@/lib/storage";
 import { processImage, POST_MAX, ACCEPT_ATTR, newImagePath, type ProcessedImage } from "@/lib/images";
+import { newAudioPath, baseMime, formatDuration } from "@/lib/audio";
 import { Avatar } from "@/components/ui/Avatar";
+import { VoiceNote, useVoiceRecorder } from "@/components/chat/VoiceNote";
 import { loadOlderMessages } from "@/app/(app)/messages/actions";
 import type { ChatMessage, ChatPeer, ReplyPreview } from "@/lib/data/chat";
 import type { BlockStatus } from "@/lib/data/profiles";
-import { MESSAGE_PAGE, CHAT_PHOTO_DAYS } from "@/lib/constants";
+import { MESSAGE_PAGE, CHAT_PHOTO_DAYS, CHAT_VOICE_DAYS, VOICE_MAX_SECONDS } from "@/lib/constants";
 
 type Props = {
   conversationId: string;
@@ -39,6 +41,24 @@ function clock(iso: string) {
 function daysLeft(iso: string) {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
 }
+// One-line label for a quoted message, valid even after its media expired.
+function replyLabel(r: Pick<ReplyPreview, "body" | "image_path" | "image_expires_at" | "audio_path" | "audio_expires_at">) {
+  if (r.audio_path || r.audio_expires_at) return "🎤 Voice message";
+  if (r.image_path || r.image_expires_at) return "📷 Photo";
+  return r.body;
+}
+function toReplyPreview(m: ChatMessage): ReplyPreview {
+  return {
+    id: m.id,
+    body: m.body,
+    sender_id: m.sender_id,
+    image_path: m.image_path,
+    image_expires_at: m.image_expires_at,
+    audio_path: m.audio_path,
+    audio_expires_at: m.audio_expires_at,
+  };
+}
+const REPLY_SELECT = "id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at";
 
 export function ChatThread({ conversationId, meId, peer, initialMessages, blocked }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
@@ -55,6 +75,8 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const rec = useVoiceRecorder(VOICE_MAX_SECONDS);
+  const clip = rec.clip;
 
   const markRead = useCallback(async () => {
     const supabase = createClient();
@@ -90,9 +112,9 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
         let reply: ReplyPreview | null = null;
         if (row.reply_to_id) {
           const local = messagesRef.current.find((m) => m.id === row.reply_to_id);
-          if (local) reply = { id: local.id, body: local.body, sender_id: local.sender_id, image_path: local.image_path };
+          if (local) reply = toReplyPreview(local);
           else {
-            const { data } = await supabase.from("messages").select("id, body, sender_id, image_path").eq("id", row.reply_to_id).maybeSingle();
+            const { data } = await supabase.from("messages").select(REPLY_SELECT).eq("id", row.reply_to_id).maybeSingle();
             reply = data ?? null;
           }
         }
@@ -146,7 +168,7 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const body = text.trim();
-    if ((!body && !photo) || sending) return;
+    if ((!body && !photo && !clip) || sending) return;
     setSending(true);
     setError(null);
     const supabase = createClient();
@@ -163,6 +185,21 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
       }
     }
 
+    let audio_path: string | null = null;
+    let audio_duration_ms: number | null = null;
+    if (clip) {
+      audio_path = newAudioPath(meId, clip.mime);
+      audio_duration_ms = Math.round(clip.durationMs);
+      const { error: upErr } = await supabase.storage
+        .from("chat")
+        .upload(audio_path, clip.blob, { contentType: baseMime(clip.mime), cacheControl: "604800" });
+      if (upErr) {
+        setSending(false);
+        return setError("Couldn't upload the voice message.");
+      }
+    }
+
+    // Media expiry (image_expires_at / audio_expires_at) is stamped by the database.
     const { data, error: err } = await supabase
       .from("messages")
       .insert({
@@ -170,22 +207,25 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
         sender_id: meId,
         body,
         image_path,
-        image_expires_at: image_path ? new Date(Date.now() + CHAT_PHOTO_DAYS * 86_400_000).toISOString() : null,
+        audio_path,
+        audio_duration_ms,
         reply_to_id: replyTo?.id ?? null,
       })
-      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, reply_to_id, created_at")
+      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, created_at")
       .single();
     setSending(false);
     if (err || !data) {
-      if (image_path) await supabase.storage.from("chat").remove([image_path]);
+      const uploaded = [image_path, audio_path].filter((p): p is string => Boolean(p));
+      if (uploaded.length) await supabase.storage.from("chat").remove(uploaded);
       return setError(/blocked|violates/i.test(err?.message ?? "") ? "You can't message this person." : "Couldn't send. Check your connection.");
     }
-    const reply = replyTo ? { id: replyTo.id, body: replyTo.body, sender_id: replyTo.sender_id, image_path: replyTo.image_path } : null;
+    const reply = replyTo ? toReplyPreview(replyTo) : null;
     setMessages((m) => (m.some((x) => x.id === data.id) ? m : [...m, { ...data, story: null, reply }]));
     setText("");
     setReplyTo(null);
     if (photo) URL.revokeObjectURL(photo.previewUrl);
     setPhoto(null);
+    rec.reset();
     inputRef.current?.focus();
     markRead();
     requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
@@ -263,7 +303,7 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
               <Reply className="size-4 shrink-0 text-brand" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-brand">{replyTo.sender_id === meId ? "You" : peer.full_name}</p>
-                <p className="truncate text-ink-muted">{replyTo.image_path ? "📷 Photo" : replyTo.body || "Photo"}</p>
+                <p className="truncate text-ink-muted">{replyLabel(replyTo)}</p>
               </div>
               <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" className="rounded-full p-1 text-ink-muted hover:bg-surface-2">
                 <X className="size-4" />
@@ -283,37 +323,85 @@ export function ChatThread({ conversationId, meId, peer, initialMessages, blocke
               </button>
             </div>
           )}
-          <div className="flex items-center gap-2 px-3 py-2">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={preparing || sending}
-              aria-label="Send a photo"
-              className="rounded-full p-2 text-ink-muted hover:bg-surface-2 hover:text-ink disabled:opacity-50"
-            >
-              {preparing ? <Loader2 className="size-5 animate-spin" /> : <ImagePlus className="size-5" />}
-            </button>
-            <input ref={fileRef} type="file" accept={ACCEPT_ATTR} className="hidden" onChange={pickPhoto} />
-            <input
-              ref={inputRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              maxLength={2000}
-              placeholder={photo ? "Add a caption…" : "Message…"}
-              autoComplete="off"
-              enterKeyHint="send"
-              className="input rounded-full"
-            />
-            <button
-              type="submit"
-              disabled={sending || (!text.trim() && !photo)}
-              aria-label="Send"
-              className="btn-primary rounded-full p-2.5"
-            >
-              {sending ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
-            </button>
-          </div>
-          {error && <p className="px-4 pb-2 text-xs text-danger">{error}</p>}
+          {clip && (
+            <div className="px-3 pt-2">
+              <div className="flex items-center gap-2">
+                <VoiceNote src={clip.previewUrl} durationMs={clip.durationMs} className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-1.5 text-ink" />
+                <button type="button" onClick={rec.reset} aria-label="Remove voice message" className="rounded-full p-1.5 text-ink-muted hover:bg-surface-2">
+                  <X className="size-4" />
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">
+                <Clock className="mr-1 inline size-3.5" />
+                Disappears {CHAT_VOICE_DAYS} days after sending.
+              </p>
+            </div>
+          )}
+          {rec.recording ? (
+            <div className="flex items-center gap-3 px-3 py-2">
+              <button
+                type="button"
+                onClick={rec.cancel}
+                aria-label="Discard recording"
+                className="rounded-full p-2 text-ink-muted hover:bg-surface-2 hover:text-danger"
+              >
+                <Trash2 className="size-5" />
+              </button>
+              <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-danger" aria-hidden />
+              <span className="flex-1 text-sm tabular-nums" aria-live="polite">
+                {formatDuration(rec.elapsedMs)}
+                <span className="text-ink-faint"> / {formatDuration(VOICE_MAX_SECONDS * 1000)}</span>
+              </span>
+              <button type="button" onClick={rec.stop} aria-label="Stop recording" className="btn-primary rounded-full p-2.5">
+                <Square className="size-5 fill-current" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={preparing || sending || Boolean(clip)}
+                aria-label="Send a photo"
+                className="rounded-full p-2 text-ink-muted hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+              >
+                {preparing ? <Loader2 className="size-5 animate-spin" /> : <ImagePlus className="size-5" />}
+              </button>
+              <input ref={fileRef} type="file" accept={ACCEPT_ATTR} className="hidden" onChange={pickPhoto} />
+              <input
+                ref={inputRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                maxLength={2000}
+                placeholder={photo || clip ? "Add a caption…" : "Message…"}
+                autoComplete="off"
+                enterKeyHint="send"
+                className="input rounded-full"
+              />
+              {/* Mic until there's something to send, then the send button (WhatsApp-style) */}
+              {!text.trim() && !photo && !clip && rec.supported ? (
+                <button
+                  type="button"
+                  onClick={rec.start}
+                  disabled={sending || preparing}
+                  aria-label="Record a voice message"
+                  className="btn-primary rounded-full p-2.5"
+                >
+                  <Mic className="size-5" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={sending || (!text.trim() && !photo && !clip)}
+                  aria-label="Send"
+                  className="btn-primary rounded-full p-2.5"
+                >
+                  {sending ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
+                </button>
+              )}
+            </div>
+          )}
+          {(error || rec.error) && <p className="px-4 pb-2 text-xs text-danger">{error ?? rec.error}</p>}
         </form>
       )}
 
@@ -384,6 +472,9 @@ function Bubble({
   const storySrc = m.story ? publicUrl("stories", m.story.image_path) : null;
   const imgSrc = m.image_path ? publicUrl("chat", m.image_path) : null;
   const photoExpired = !m.image_path && m.image_expires_at !== null;
+  const audioSrc = m.audio_path ? publicUrl("chat", m.audio_path) : null;
+  const voiceExpired = !m.audio_path && m.audio_expires_at !== null;
+  const mediaExpiresAt = imgSrc ? m.image_expires_at : audioSrc ? m.audio_expires_at : null;
 
   return (
     <div
@@ -439,7 +530,7 @@ function Bubble({
               <span className={`block font-semibold ${mine ? "opacity-90" : "text-brand"}`}>
                 {m.reply.sender_id === meId ? "You" : peer.full_name}
               </span>
-              <span className="line-clamp-2 opacity-80">{m.reply.image_path ? "📷 Photo" : m.reply.body || "Photo"}</span>
+              <span className="line-clamp-2 opacity-80">{replyLabel(m.reply)}</span>
             </button>
           )}
 
@@ -454,10 +545,18 @@ function Bubble({
               <Clock className="size-3.5" /> Photo expired
             </p>
           )}
+          {audioSrc && (
+            <VoiceNote src={audioSrc} durationMs={m.audio_duration_ms} mine={mine} className="w-64 max-w-full px-3 py-2" />
+          )}
+          {voiceExpired && (
+            <p className="flex items-center gap-1.5 px-3.5 py-2 text-sm italic opacity-70">
+              <Clock className="size-3.5" /> Voice message expired
+            </p>
+          )}
           {m.body && <p className="whitespace-pre-wrap break-words px-3.5 py-2">{m.body}</p>}
-          {imgSrc && m.image_expires_at && (
+          {mediaExpiresAt && (
             <p className={`px-3 pb-1.5 text-[10px] ${mine ? "text-brand-ink/70" : "text-ink-faint"} ${m.body ? "-mt-1" : "pt-1"}`}>
-              disappears in {daysLeft(m.image_expires_at)}d
+              disappears in {daysLeft(mediaExpiresAt)}d
             </p>
           )}
         </div>

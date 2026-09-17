@@ -12,7 +12,7 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const report = { posts: 0, postImages: 0, stories: 0, chatPhotos: 0, errors: [] as string[] };
+  const report = { posts: 0, postImages: 0, stories: 0, chatPhotos: 0, voiceMessages: 0, errors: [] as string[] };
 
   // ---- expired posts -------------------------------------------------
   const { data: posts, error: pErr } = await admin
@@ -73,6 +73,25 @@ export async function GET(request: Request) {
     const { error } = await admin.from("messages").update({ image_path: null }).in("id", photos.map((p) => p.id));
     if (error) report.errors.push(`chat photo rows: ${error.message}`);
     else report.chatPhotos = photos.length;
+  }
+
+  // ---- voice messages older than their expiry (row stays as "expired") -----
+  const { data: voices, error: vErr } = await admin
+    .from("messages")
+    .select("id, audio_path")
+    .not("audio_path", "is", null)
+    .lte("audio_expires_at", now)
+    .limit(1000);
+  if (vErr) report.errors.push(`voice messages: ${vErr.message}`);
+  if (voices && voices.length > 0) {
+    const paths = voices.map((v) => v.audio_path!).filter(Boolean);
+    for (let i = 0; i < paths.length; i += 100) {
+      const { error } = await admin.storage.from("chat").remove(paths.slice(i, i + 100));
+      if (error) report.errors.push(`voice files: ${error.message}`);
+    }
+    const { error } = await admin.from("messages").update({ audio_path: null }).in("id", voices.map((v) => v.id));
+    if (error) report.errors.push(`voice rows: ${error.message}`);
+    else report.voiceMessages = voices.length;
   }
 
   // ---- old notifications (keep the activity page light) -----------------

@@ -463,6 +463,9 @@ export type Database = {
           story_id: string | null;
           image_path: string | null;
           image_expires_at: string | null;
+          audio_path: string | null;
+          audio_duration_ms: number | null;
+          audio_expires_at: string | null;
           reply_to_id: string | null;
           created_at: string;
         };
@@ -474,6 +477,9 @@ export type Database = {
           story_id?: string | null;
           image_path?: string | null;
           image_expires_at?: string | null;
+          audio_path?: string | null;
+          audio_duration_ms?: number | null;
+          audio_expires_at?: string | null;
           reply_to_id?: string | null;
           created_at?: string;
         };
@@ -485,6 +491,9 @@ export type Database = {
           story_id?: string | null;
           image_path?: string | null;
           image_expires_at?: string | null;
+          audio_path?: string | null;
+          audio_duration_ms?: number | null;
+          audio_expires_at?: string | null;
           reply_to_id?: string | null;
           created_at?: string;
         };

@@ -14,7 +14,14 @@ type NotificationRow = {
   post_id: string | null;
   comment_id: string | null;
 };
-type MessageRow = { id: string; conversation_id: string; sender_id: string; body: string; image_path: string | null };
+type MessageRow = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  image_path: string | null;
+  audio_path: string | null;
+};
 type AnnouncementRow = { id: string; body: string };
 
 async function usernameOf(id: string) {
@@ -61,7 +68,7 @@ export async function POST(request: Request) {
     const other = conv.user_a === msg.sender_id ? conv.user_b : conv.user_a;
     const sender = await usernameOf(msg.sender_id);
     recipients = [other];
-    const text = msg.body ? msg.body.slice(0, 100) : "📷 Photo";
+    const text = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
     payload = { title: sender, body: text, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` };
   } else if (table === "announcements") {
     const a = record as AnnouncementRow;

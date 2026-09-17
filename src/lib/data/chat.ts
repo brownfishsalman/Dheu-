@@ -10,7 +10,14 @@ export type ConversationSummary = {
   id: string;
   peer: ChatPeer;
   last_message_at: string | null;
-  last: { body: string; sender_id: string; created_at: string; story_id: string | null; image_path: string | null } | null;
+  last: {
+    body: string;
+    sender_id: string;
+    created_at: string;
+    story_id: string | null;
+    image_path: string | null;
+    audio_path: string | null;
+  } | null;
   unread: number;
 };
 
@@ -20,7 +27,7 @@ export async function getConversations(meId: string): Promise<ConversationSummar
     supabase
       .from("conversations")
       .select(
-        "id, last_message_at, a:profiles!conversations_user_a_fkey(id, username, full_name, avatar_path), b:profiles!conversations_user_b_fkey(id, username, full_name, avatar_path), messages(body, sender_id, created_at, story_id, image_path)",
+        "id, last_message_at, a:profiles!conversations_user_a_fkey(id, username, full_name, avatar_path), b:profiles!conversations_user_b_fkey(id, username, full_name, avatar_path), messages(body, sender_id, created_at, story_id, image_path, audio_path)",
       )
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { referencedTable: "messages", ascending: false })
@@ -64,7 +71,17 @@ export async function getConversation(
   return { id: data.id, peer, blocked: (blocked as BlockStatus) ?? null };
 }
 
-export type ReplyPreview = { id: string; body: string; sender_id: string; image_path: string | null };
+// Enough of the quoted message to label it ("📷 Photo", "🎤 Voice message", or the text),
+// even after its media has expired.
+export type ReplyPreview = {
+  id: string;
+  body: string;
+  sender_id: string;
+  image_path: string | null;
+  image_expires_at: string | null;
+  audio_path: string | null;
+  audio_expires_at: string | null;
+};
 
 export type ChatMessage = {
   id: string;
@@ -74,6 +91,9 @@ export type ChatMessage = {
   story_id: string | null;
   image_path: string | null;
   image_expires_at: string | null;
+  audio_path: string | null;
+  audio_duration_ms: number | null;
+  audio_expires_at: string | null;
   reply_to_id: string | null;
   created_at: string;
   story: { image_path: string; author_id: string } | null;
@@ -81,7 +101,7 @@ export type ChatMessage = {
 };
 
 export const MESSAGE_SELECT =
-  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, reply_to_id, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path)";
+  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at)";
 
 
 export async function getMessages(conversationId: string, before?: string): Promise<ChatMessage[]> {

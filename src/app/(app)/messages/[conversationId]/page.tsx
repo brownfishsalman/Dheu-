@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Info } from "lucide-react";
 import { requireProfile } from "@/lib/data/session";
 import { getConversation, getMessages, getPeers } from "@/lib/data/chat";
+import { eventPeople } from "@/lib/chat-events";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Avatar } from "@/components/ui/Avatar";
 import { GroupAvatar } from "@/components/chat/GroupAvatar";
@@ -23,10 +24,11 @@ export default async function ConversationPage(props: PageProps<"/messages/[conv
   if (!conv) notFound();
   const messages = await getMessages(conv.id);
 
-  // People who have left the group but whose messages are still here.
+  // People who have left the group but are still named here — as senders, or
+  // in system lines ("Salman removed Tania").
   const known = new Set(conv.members.map((m) => m.id));
   const former = conv.isGroup
-    ? await getPeers([...new Set(messages.map((m) => m.sender_id).filter((id) => !known.has(id)))])
+    ? await getPeers([...new Set(messages.flatMap(eventPeople).filter((id) => !known.has(id)))])
     : [];
   const others = conv.members.filter((m) => m.id !== me.id);
 

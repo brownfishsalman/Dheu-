@@ -69,7 +69,9 @@ export default async function MessagesPage() {
                   : ""
               : "";
             const preview = c.last
-              ? `${who}${c.last.story_id ? "Replied to a story: " : ""}${c.last.image_path ? "📷 Photo " : ""}${c.last.audio_path ? "🎤 Voice message " : ""}${c.last.body}`
+              ? c.last.kind === "system"
+                ? c.last.body // "Salman added Rafi Karim"
+                : `${who}${c.last.story_id ? "Replied to a story: " : ""}${c.last.image_path ? "📷 Photo " : ""}${c.last.audio_path ? "🎤 Voice message " : ""}${c.last.body}`
               : c.isGroup
                 ? `${c.memberCount} members · No messages yet`
                 : "No messages yet";

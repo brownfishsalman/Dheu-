@@ -1,6 +1,7 @@
 // Hand-written to mirror supabase/migrations/*.sql. Keep the two in sync.
 
 export type NotificationType = "like" | "follow" | "comment" | "story_reaction" | "follow_request" | "follow_accepted";
+export type MessageKind = "text" | "system";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -511,6 +512,8 @@ export type Database = {
           audio_duration_ms: number | null;
           audio_expires_at: string | null;
           reply_to_id: string | null;
+          kind: MessageKind;
+          event: Json | null; // system lines only (see SystemEvent in lib/data/chat)
           created_at: string;
         };
         Insert: {
@@ -525,6 +528,8 @@ export type Database = {
           audio_duration_ms?: number | null;
           audio_expires_at?: string | null;
           reply_to_id?: string | null;
+          kind?: MessageKind;
+          event?: Json | null;
           created_at?: string;
         };
         Update: {
@@ -539,6 +544,8 @@ export type Database = {
           audio_duration_ms?: number | null;
           audio_expires_at?: string | null;
           reply_to_id?: string | null;
+          kind?: MessageKind;
+          event?: Json | null;
           created_at?: string;
         };
         Relationships: [

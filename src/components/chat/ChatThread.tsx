@@ -13,6 +13,7 @@ import { GroupAvatar } from "@/components/chat/GroupAvatar";
 import { VoiceNote, useVoiceRecorder } from "@/components/chat/VoiceNote";
 import { loadOlderMessages } from "@/app/(app)/messages/actions";
 import type { ChatMessage, ChatPeer, ReplyPreview } from "@/lib/data/chat";
+import { eventPeople } from "@/lib/chat-events";
 import type { BlockStatus } from "@/lib/data/profiles";
 import { MESSAGE_PAGE, CHAT_PHOTO_DAYS, CHAT_VOICE_DAYS, VOICE_MAX_SECONDS } from "@/lib/constants";
 
@@ -64,6 +65,29 @@ function toReplyPreview(m: ChatMessage): ReplyPreview {
   };
 }
 const REPLY_SELECT = "id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at";
+
+// "You added Rafi Karim, Tania Sultana" — rendered from the event so the
+// viewer's own name becomes "You"; the stored body is the fallback.
+function systemText(m: ChatMessage, nameOf: (id: string) => string): string {
+  const e = m.event;
+  if (!e) return m.body;
+  const actor = nameOf(e.actor);
+  const targets = (e.targets ?? []).map(nameOf).join(", ");
+  switch (e.type) {
+    case "created":
+      return `${actor} created the group`;
+    case "added":
+      return `${actor} added ${targets || "someone"}`;
+    case "removed":
+      return `${actor} removed ${targets || "someone"}`;
+    case "left":
+      return `${actor} left`;
+    case "renamed":
+      return `${actor} renamed the group to “${e.title ?? ""}”`;
+    default:
+      return m.body;
+  }
+}
 
 export function ChatThread({ conversationId, meId, peer, group, members, initialMessages, blocked }: Props) {
   const isGroup = group !== null;
@@ -120,13 +144,18 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
       { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
       async (payload) => {
         const row = payload.new as Omit<ChatMessage, "story" | "reply">;
-        if (row.sender_id !== meId && !peopleRef.current.has(row.sender_id)) {
-          const { data: p } = await supabase
-            .from("profiles")
-            .select("id, username, full_name, avatar_path")
-            .eq("id", row.sender_id)
-            .maybeSingle();
-          if (p) setPeople((prev) => new Map(prev).set(p.id, p));
+        // Learn anyone new this message names: the sender, or the people a
+        // system line mentions ("Salman added Rafi").
+        const unknown = [...new Set(eventPeople(row))].filter((id) => id !== meId && !peopleRef.current.has(id));
+        if (unknown.length > 0) {
+          const { data: ps } = await supabase.from("profiles").select("id, username, full_name, avatar_path").in("id", unknown);
+          if (ps && ps.length > 0) {
+            setPeople((prev) => {
+              const next = new Map(prev);
+              for (const p of ps) next.set(p.id, p);
+              return next;
+            });
+          }
         }
         let story: ChatMessage["story"] = null;
         if (row.story_id) {
@@ -235,7 +264,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
         audio_duration_ms,
         reply_to_id: replyTo?.id ?? null,
       })
-      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, created_at")
+      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, created_at")
       .single();
     setSending(false);
     if (err || !data) {
@@ -244,7 +273,8 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
       return setError(/blocked|violates/i.test(err?.message ?? "") ? "You can't message this person." : "Couldn't send. Check your connection.");
     }
     const reply = replyTo ? toReplyPreview(replyTo) : null;
-    setMessages((m) => (m.some((x) => x.id === data.id) ? m : [...m, { ...data, story: null, reply }]));
+    // Members can only insert kind = 'text', so event is always null here.
+    setMessages((m) => (m.some((x) => x.id === data.id) ? m : [...m, { ...data, event: null, story: null, reply }]));
     setText("");
     setReplyTo(null);
     if (photo) URL.revokeObjectURL(photo.previewUrl);
@@ -306,10 +336,22 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
           const prev = messages[i - 1];
           const next = messages[i + 1];
           const showDay = !prev || !sameDay(prev.created_at, m.created_at);
-          const grouped = prev && prev.sender_id === m.sender_id && !showDay &&
+          if (m.kind === "system") {
+            return (
+              <div key={m.id}>
+                {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
+                <p className="my-2 px-6 text-center text-xs text-ink-faint" title={clock(m.created_at)}>
+                  {systemText(m, nameOf)}
+                </p>
+              </div>
+            );
+          }
+          // Consecutive bubbles from one person within 5 minutes form a run; a
+          // day change or a system line breaks it.
+          const grouped = prev && prev.kind !== "system" && prev.sender_id === m.sender_id && !showDay &&
             new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60_000;
           // In groups: name above the first bubble of a run, avatar beside the last.
-          const endOfRun = !next || next.sender_id !== m.sender_id || !sameDay(m.created_at, next.created_at) ||
+          const endOfRun = !next || next.kind === "system" || next.sender_id !== m.sender_id || !sameDay(m.created_at, next.created_at) ||
             new Date(next.created_at).getTime() - new Date(m.created_at).getTime() >= 5 * 60_000;
           return (
             <div key={m.id}>

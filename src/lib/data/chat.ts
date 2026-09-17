@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/database.types";
+import type { Profile, MessageKind } from "@/lib/database.types";
+import type { SystemEvent } from "@/lib/chat-events";
 import type { BlockStatus } from "@/lib/data/profiles";
 import { MESSAGE_PAGE } from "@/lib/constants";
 
@@ -33,6 +34,7 @@ export type ConversationSummary = {
     story_id: string | null;
     image_path: string | null;
     audio_path: string | null;
+    kind: MessageKind;
   } | null;
   unread: number;
 };
@@ -43,7 +45,7 @@ export async function getConversations(meId: string): Promise<ConversationSummar
     supabase
       .from("conversations")
       .select(
-        `id, is_group, title, last_message_at, ${MEMBER_EMBED}, messages(body, sender_id, created_at, story_id, image_path, audio_path, sender:profiles!messages_sender_id_fkey(full_name))`,
+        `id, is_group, title, last_message_at, ${MEMBER_EMBED}, messages(body, sender_id, created_at, story_id, image_path, audio_path, kind, sender:profiles!messages_sender_id_fkey(full_name))`,
       )
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { referencedTable: "messages", ascending: false })
@@ -146,13 +148,15 @@ export type ChatMessage = {
   audio_duration_ms: number | null;
   audio_expires_at: string | null;
   reply_to_id: string | null;
+  kind: MessageKind;
+  event: SystemEvent | null;
   created_at: string;
   story: { image_path: string; author_id: string } | null;
   reply: ReplyPreview | null;
 };
 
 export const MESSAGE_SELECT =
-  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at)";
+  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at)";
 
 
 export async function getMessages(conversationId: string, before?: string): Promise<ChatMessage[]> {

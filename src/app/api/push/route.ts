@@ -21,6 +21,8 @@ type MessageRow = {
   body: string;
   image_path: string | null;
   audio_path: string | null;
+  kind: "text" | "system";
+  event: { type: string; actor: string; targets?: string[]; title?: string } | null;
 };
 type AnnouncementRow = { id: string; body: string };
 
@@ -74,12 +76,22 @@ export async function POST(request: Request) {
     ]);
     if (!conv) return NextResponse.json({ ok: true, skipped: "no conversation" });
     const blocked = new Set((blocks ?? []).flatMap((b) => [b.blocker_id, b.blocked_id]));
-    recipients = conv.members.map((m) => m.user_id).filter((id) => id !== msg.sender_id && !(conv.is_group && blocked.has(id)));
     const sender = await usernameOf(msg.sender_id);
-    const text = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
-    payload = conv.is_group
-      ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` }
-      : { title: sender, body: text, url: `/messages/${msg.conversation_id}`, tag: `chat-${msg.conversation_id}` };
+    const url = `/messages/${msg.conversation_id}`;
+    const tag = `chat-${msg.conversation_id}`;
+
+    if (msg.kind === "system") {
+      // System lines stay quiet, except that people who were just added should hear about it.
+      if (msg.event?.type !== "added") return NextResponse.json({ ok: true, skipped: "system line" });
+      recipients = (msg.event.targets ?? []).filter((id) => !blocked.has(id));
+      payload = { title: conv.title ?? "Group", body: `${sender} added you to the group`, url, tag };
+    } else {
+      recipients = conv.members.map((m) => m.user_id).filter((id) => id !== msg.sender_id && !(conv.is_group && blocked.has(id)));
+      const text = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
+      payload = conv.is_group
+        ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url, tag }
+        : { title: sender, body: text, url, tag };
+    }
   } else if (table === "announcements") {
     const a = record as AnnouncementRow;
     const { data: subs } = await admin.from("push_subscriptions").select("user_id");

@@ -41,6 +41,7 @@ Useful commands:
    - `supabase/migrations/0009_push_failsafe.sql` (same two placeholders)
    - `supabase/migrations/0010_voice_messages.sql`
    - `supabase/migrations/0011_group_chats.sql`
+   - `supabase/migrations/0012_group_system_messages.sql`
 2. **Turn off "Confirm email"** – Supabase → Authentication → Sign In / Providers → Email → untick _Confirm email_. (Accounts are created by the app with the invite code, so no confirmation email is needed. The free tier can't send emails to arbitrary addresses anyway.)
 3. **Keys** – Supabase → Project Settings → API keys. Put the URL, the _publishable_ key and the _secret_ key in `.env.local` (copy `.env.example`).
 4. **First account = admin.** The very first person to sign up doesn't need an invite code and automatically becomes the admin. Do this yourself immediately after deploying.

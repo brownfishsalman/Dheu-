@@ -1,0 +1,425 @@
+package com.salmansaadiq.dheu.ui.settings
+
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.salmansaadiq.dheu.BuildConfig
+import com.salmansaadiq.dheu.core.parseInstant
+import com.salmansaadiq.dheu.data.Account
+import com.salmansaadiq.dheu.data.InviteCode
+import com.salmansaadiq.dheu.data.Profiles
+import com.salmansaadiq.dheu.data.ThemePrefs
+import com.salmansaadiq.dheu.data.friendly
+import com.salmansaadiq.dheu.ui.Load
+import com.salmansaadiq.dheu.ui.LocalAppState
+import com.salmansaadiq.dheu.ui.auth.AccountTypePicker
+import com.salmansaadiq.dheu.ui.components.Avatar
+import com.salmansaadiq.dheu.ui.components.ConfirmDialog
+import com.salmansaadiq.dheu.ui.components.DheuTextField
+import com.salmansaadiq.dheu.ui.components.DheuTopBar
+import com.salmansaadiq.dheu.ui.components.ErrorState
+import com.salmansaadiq.dheu.ui.components.Loading
+import com.salmansaadiq.dheu.ui.components.PersonRow
+import com.salmansaadiq.dheu.ui.components.PrimaryButton
+import com.salmansaadiq.dheu.ui.components.SecondaryButton
+import com.salmansaadiq.dheu.ui.components.rememberToast
+import com.salmansaadiq.dheu.ui.icons.Lucide
+import com.salmansaadiq.dheu.ui.nav.BlockedRoute
+import com.salmansaadiq.dheu.ui.nav.EditProfileRoute
+import com.salmansaadiq.dheu.ui.nav.LocalNav
+import com.salmansaadiq.dheu.ui.rememberLoader
+import com.salmansaadiq.dheu.ui.theme.Dheu
+import com.salmansaadiq.dheu.ui.theme.ThemeMode
+import kotlinx.coroutines.launch
+import java.time.Instant
+
+@Composable
+private fun Card(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    val c = Dheu.colors
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(14.dp)).padding(18.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        if (subtitle != null) Text(subtitle, color = c.inkMuted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 2.dp))
+        Spacer(Modifier.height(12.dp))
+        content()
+    }
+}
+
+@Composable
+fun SettingsScreen() {
+    val nav = LocalNav.current
+    val app = LocalAppState.current
+    val me by app.me.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    val c = Dheu.colors
+    val profile = me ?: return
+    val themes = remember { ThemePrefs.flow(context.applicationContext) }
+    val theme by themes.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
+    var privacy by remember(profile.isPrivate) { mutableStateOf(if (profile.isPrivate) "private" else "public") }
+    var confirmPrivacy by remember { mutableStateOf(false) }
+    var savingPrivacy by remember { mutableStateOf(false) }
+    var confirmLogout by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize().background(c.canvas)) {
+        DheuTopBar("Settings", onBack = nav::back)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card("Profile") {
+                Row(Modifier.fillMaxWidth().clickable { nav.to(EditProfileRoute) }, verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(profile.avatarPath, profile.fullName, 48.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.fullName, fontWeight = FontWeight.SemiBold)
+                        Text("@${profile.username}", color = c.inkMuted)
+                    }
+                    Icon(Lucide.ChevronRight, null, tint = c.inkFaint)
+                }
+            }
+
+            Card("Account privacy", "Who can see your posts, stories and followers.") {
+                AccountTypePicker(privacy) { privacy = it }
+                if (privacy != (if (profile.isPrivate) "private" else "public")) {
+                    PrimaryButton("Save", { confirmPrivacy = true }, Modifier.padding(top = 12.dp), loading = savingPrivacy)
+                }
+            }
+
+            Card("Notifications") {
+                Text("Push notifications arrive in a later version of the app. Until then, turn them on from the website on this phone (Settings → Notifications).", color = c.inkMuted)
+            }
+
+            InvitesCard(app.userId)
+
+            Card("Appearance", "Choose how Dheu looks on this device.") {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    ThemeMode.entries.forEachIndexed { i, mode ->
+                        SegmentedButton(
+                            selected = theme == mode,
+                            onClick = { scope.launch { ThemePrefs.set(context.applicationContext, mode) } },
+                            shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
+                            colors = SegmentedButtonDefaults.colors(activeContainerColor = c.brandSoft, activeContentColor = c.ink, inactiveContainerColor = c.surface),
+                        ) { Text(mode.name) }
+                    }
+                }
+            }
+
+            PasswordCard()
+
+            Card("Blocked accounts", "Blocked members can't see your photos or message you, and you won't see theirs.") {
+                SecondaryButton("Manage blocked accounts", { nav.to(BlockedRoute) }, icon = Lucide.Ban)
+            }
+
+            if (profile.isAdmin) {
+                Card("Admin", "Invite codes, members, moderation and announcements live on the website.") {
+                    SecondaryButton("Open the admin panel", {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, "${BuildConfig.SITE_URL}/admin".toUri()))
+                    }, icon = Lucide.ShieldCheck)
+                }
+            }
+
+            SecondaryButton("Log out", { confirmLogout = true }, Modifier.fillMaxWidth(), icon = Lucide.LogOut, danger = true)
+            Text(
+                "Dheu ${BuildConfig.VERSION_NAME} · posts expire after 3 months · stories after 24 hours",
+                color = c.inkFaint,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp),
+            )
+        }
+    }
+
+    if (confirmPrivacy) {
+        ConfirmDialog(
+            title = if (privacy == "public") "Make your account public?" else "Make your account private?",
+            text = if (privacy == "public") "Anyone on Dheu will see your posts and stories, and pending follow requests will be approved."
+            else "New followers will need your approval. People who already follow you will stay.",
+            confirmLabel = "Save",
+            danger = false,
+            onConfirm = {
+                savingPrivacy = true
+                scope.launch {
+                    try {
+                        Profiles.setPrivacy(privacy == "private")
+                        app.refreshMe()
+                        toast("Saved")
+                    } catch (e: Exception) {
+                        toast(e.friendly("Couldn't save that."))
+                    } finally {
+                        savingPrivacy = false
+                    }
+                }
+            },
+            onDismiss = { confirmPrivacy = false },
+        )
+    }
+    if (confirmLogout) {
+        ConfirmDialog("Log out?", "You'll need your email and password to log back in.", "Log out", onConfirm = {
+            scope.launch { runCatching { Account.signOut() } }
+        }, onDismiss = { confirmLogout = false })
+    }
+}
+
+@Composable
+private fun InvitesCard(me: String) {
+    val c = Dheu.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    val loader = rememberLoader("invites") { Account.inviteCodes(me) }
+    var creating by remember { mutableStateOf(false) }
+
+    fun share(code: String) {
+        val text = "Join me on Dheu: ${Account.inviteLink(code)}"
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share invite"))
+    }
+
+    Card("Share with friends", "Each code lets one friend create an account and is valid for 30 days. You can hold 5 unused codes at a time.") {
+        when (val s = loader.state) {
+            Load.Loading -> Text("Loading…", color = c.inkFaint)
+            is Load.Failed -> Text(s.message, color = c.danger)
+            is Load.Ready -> {
+                val now = Instant.now()
+                s.value.forEach { code -> InviteRow(code, now) { share(code.code) } }
+                if (s.value.isEmpty()) Text("No codes yet.", color = c.inkFaint)
+            }
+        }
+        PrimaryButton(
+            "Create an invite code",
+            {
+                creating = true
+                scope.launch {
+                    try {
+                        val code = Account.createInviteCode()
+                        loader.reload(silent = true)
+                        share(code)
+                    } catch (e: Exception) {
+                        toast(e.friendly("Couldn't create a code."))
+                    } finally {
+                        creating = false
+                    }
+                }
+            },
+            Modifier.padding(top = 12.dp),
+            loading = creating,
+            icon = Lucide.Ticket,
+        )
+    }
+}
+
+@Composable
+private fun InviteRow(code: InviteCode, now: Instant, onShare: () -> Unit) {
+    val c = Dheu.colors
+    val used = code.useCount >= code.maxUses
+    val expired = code.expiresAt?.let { parseInstant(it).isBefore(now) } == true
+    val status = when {
+        used -> "Used"
+        code.disabled -> "Disabled"
+        expired -> "Expired"
+        else -> null
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(code.code, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), color = if (status != null) c.inkFaint else c.ink)
+        if (status != null) Text(status, color = c.inkFaint, style = MaterialTheme.typography.bodySmall)
+        else SecondaryButton("Share", onShare, compact = true, icon = Lucide.Share)
+    }
+}
+
+@Composable
+private fun PasswordCard() {
+    val c = Dheu.colors
+    val scope = rememberCoroutineScope()
+    var password by remember { mutableStateOf("") }
+    var again by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    Card("Password") {
+        DheuTextField(password, { password = it }, "New password", password = true, supporting = "At least 8 characters")
+        Spacer(Modifier.height(8.dp))
+        DheuTextField(again, { again = it }, "Repeat new password", password = true)
+        message?.let { (ok, text) -> Text(text, color = if (ok) c.brand else c.danger, modifier = Modifier.padding(top = 8.dp)) }
+        PrimaryButton(
+            "Change password",
+            {
+                message = when {
+                    password.length < 8 -> false to "Use at least 8 characters."
+                    password != again -> false to "The two passwords don't match."
+                    else -> null
+                }
+                if (message != null) return@PrimaryButton
+                busy = true
+                scope.launch {
+                    message = try {
+                        Account.changePassword(password)
+                        password = ""
+                        again = ""
+                        true to "Password changed."
+                    } catch (e: Exception) {
+                        false to e.friendly("Couldn't change your password.")
+                    }
+                    busy = false
+                }
+            },
+            Modifier.padding(top = 12.dp),
+            loading = busy,
+        )
+    }
+}
+
+private val USERNAME = Regex("^[a-z0-9_.]{3,30}$")
+
+@Composable
+fun EditProfileScreen() {
+    val nav = LocalNav.current
+    val app = LocalAppState.current
+    val me by app.me.collectAsStateWithLifecycle()
+    val profile = me ?: return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    val c = Dheu.colors
+    var fullName by remember { mutableStateOf(profile.fullName) }
+    var username by remember { mutableStateOf(profile.username) }
+    var bio by remember { mutableStateOf(profile.bio) }
+    var saving by remember { mutableStateOf(false) }
+    var uploading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploading = true
+        scope.launch {
+            try {
+                Profiles.replaceAvatar(context, profile.id, uri, profile.avatarPath)
+                app.refreshMe()
+            } catch (e: Exception) {
+                error = e.friendly("Couldn't update your photo.")
+            } finally {
+                uploading = false
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(c.surface).imePadding()) {
+        DheuTopBar("Edit profile", onBack = nav::back)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box { Avatar(profile.avatarPath, profile.fullName, 80.dp) }
+                Spacer(Modifier.width(16.dp))
+                SecondaryButton(
+                    "Change photo",
+                    { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    loading = uploading,
+                    icon = Lucide.Camera,
+                )
+            }
+            DheuTextField(fullName, { fullName = it }, "Name", maxLength = 60)
+            DheuTextField(username, { username = it.lowercase() }, "Username", maxLength = 30)
+            DheuTextField(bio, { bio = it }, "Bio", singleLine = false, minLines = 3, maxLength = 300, supporting = "${bio.length}/300")
+            error?.let { Text(it, color = c.danger) }
+            PrimaryButton(
+                "Save",
+                {
+                    val name = fullName.trim()
+                    val uname = username.trim().lowercase()
+                    error = when {
+                        name.isEmpty() -> "Enter your name."
+                        !USERNAME.matches(uname) -> "Username: 3–30 letters, numbers, dots or underscores."
+                        else -> null
+                    }
+                    if (error != null) return@PrimaryButton
+                    saving = true
+                    scope.launch {
+                        try {
+                            Profiles.updateDetails(profile.id, name, uname, bio.trim())
+                            app.refreshMe()
+                            toast("Saved")
+                            nav.back()
+                        } catch (e: Exception) {
+                            error = if (e.message.orEmpty().contains("duplicate") || e.message.orEmpty().contains("23505")) "That username is already taken." else e.friendly("Couldn't save your profile.")
+                        } finally {
+                            saving = false
+                        }
+                    }
+                },
+                Modifier.fillMaxWidth(),
+                loading = saving,
+            )
+        }
+    }
+}
+
+@Composable
+fun BlockedScreen() {
+    val nav = LocalNav.current
+    val me = LocalAppState.current.userId
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    val loader = rememberLoader("blocked") { Profiles.blocked(me) }
+    Column(Modifier.fillMaxSize().background(Dheu.colors.surface)) {
+        DheuTopBar("Blocked accounts", onBack = nav::back)
+        when (val s = loader.state) {
+            Load.Loading -> Loading()
+            is Load.Failed -> ErrorState(s.message, onRetry = { loader.reload() })
+            is Load.Ready ->
+                if (s.value.isEmpty()) Text("You haven't blocked anyone.", color = Dheu.colors.inkMuted, modifier = Modifier.padding(24.dp))
+                else Column {
+                    s.value.forEach { person ->
+                        PersonRow(person, relationships = null, trailing = {
+                            SecondaryButton("Unblock", {
+                                scope.launch {
+                                    try {
+                                        Profiles.unblock(me, person.id)
+                                        loader.reload(silent = true)
+                                    } catch (e: Exception) {
+                                        toast(e.friendly())
+                                    }
+                                }
+                            }, compact = true)
+                        })
+                    }
+                }
+        }
+    }
+}

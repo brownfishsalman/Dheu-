@@ -1,0 +1,17 @@
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+build/
+captures/
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+
+# Machine-specific: SDK path and the Supabase settings (see README)
+local.properties
+
+# Signing keys and passwords: never commit these
+*.jks
+*.keystore
+keystore.properties

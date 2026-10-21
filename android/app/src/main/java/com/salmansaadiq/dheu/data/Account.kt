@@ -1,0 +1,88 @@
+package com.salmansaadiq.dheu.data
+
+import com.salmansaadiq.dheu.BuildConfig
+import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Order
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import java.net.HttpURLConnection
+import java.net.URL
+
+@Serializable
+data class SignupRequest(
+    val fullName: String,
+    val username: String,
+    val email: String,
+    val password: String,
+    val inviteCode: String,
+    val accountType: String, // "public" | "private"
+)
+
+@Serializable
+private data class SiteResult(val ok: Boolean = false, val error: String? = null, val code: String? = null)
+
+object Account {
+    suspend fun signIn(email: String, password: String) {
+        Backend.auth.signInWith(Email) {
+            this.email = email.trim()
+            this.password = password
+        }
+    }
+
+    suspend fun signOut() = Backend.auth.signOut()
+
+    suspend fun changePassword(password: String) {
+        Backend.auth.updateUser { this.password = password }
+    }
+
+    /**
+     * Creating an account needs the invite check, which only the website's
+     * server can do (it holds the secret key), so the app asks it, then signs in.
+     */
+    suspend fun signUp(request: SignupRequest) {
+        val result = postToSite("/api/auth/signup", Backend.json.encodeToString(request), bearer = null)
+        if (!result.ok) throw IllegalArgumentException(result.error ?: "Could not create your account. Please try again.")
+        signIn(request.email, request.password)
+    }
+
+    suspend fun inviteCodes(me: String): List<InviteCode> =
+        Backend.client.from("invite_codes").select {
+            filter { eq("created_by", me) }
+            order("created_at", Order.DESCENDING)
+        }.decodeList()
+
+    /** A single-use code for a friend (the server holds the limits and the secret key). */
+    suspend fun createInviteCode(): String {
+        val token = Backend.auth.currentAccessTokenOrNull() ?: throw IllegalArgumentException("Not signed in.")
+        val result = postToSite("/api/invites", "{}", bearer = token)
+        if (!result.ok || result.code == null) throw IllegalArgumentException(result.error ?: "Couldn't create a code.")
+        return result.code
+    }
+
+    fun inviteLink(code: String) = "${BuildConfig.SITE_URL}/signup?code=$code"
+
+    private suspend fun postToSite(path: String, body: String, bearer: String?): SiteResult = withContext(Dispatchers.IO) {
+        val connection = (URL(BuildConfig.SITE_URL + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            if (bearer != null) setRequestProperty("Authorization", "Bearer $bearer")
+        }
+        try {
+            connection.outputStream.use { it.write(body.toByteArray()) }
+            val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            runCatching { Backend.json.decodeFromString<SiteResult>(text) }
+                .getOrElse { SiteResult(false, "Unexpected reply from the server (${connection.responseCode}).") }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}

@@ -2,7 +2,7 @@
   <img src="docs/screenshots/hero.png" alt="Dheu, a small invite-only photo community" width="100%" />
 </p>
 
-<h1 align="center">Dheu (ঢেউ)</h1>
+<h1 align="center">Dheu</h1>
 
 <p align="center">
   An invite-only, Instagram-style photo community for a small circle of people, on the web and on Android.<br/>

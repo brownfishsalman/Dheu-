@@ -12,12 +12,16 @@ import { StoryBar } from "@/components/story/StoryBar";
 export default async function HomePage() {
   const userId = await getUserId();
   if (!userId) redirect("/login");
-  // Two round-trips instead of four: (profile + following) then (feed + stories).
-  const [me, following] = await Promise.all([requireProfile(), getFollowingIds(userId)]);
-  // Suggestions appear on some feed loads, and only with 2+ people to show.
-  const [{ posts, nextCursor }, stories, suggestions] = await Promise.all([
-    getFeedPage(me.id, following),
-    getStoryFeed(me.id, following),
+  // The feed is keyed off the session, so it starts right away. Stories (and
+  // the empty-state copy) still need the following list; that pair runs
+  // alongside the feed instead of in front of it.
+  const followingIds = getFollowingIds(userId);
+  const [me, following, stories, { posts, nextCursor }, suggestions] = await Promise.all([
+    requireProfile(),
+    followingIds,
+    followingIds.then((ids) => getStoryFeed(userId, ids)),
+    getFeedPage(),
+    // Suggestions appear on some feed loads, and only with 2+ people to show.
     maybeSuggestedPeople(userId),
   ]);
 

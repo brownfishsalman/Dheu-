@@ -26,49 +26,21 @@ export type ProfileStats = {
   blockStatus: BlockStatus;
 };
 
-export async function getProfileStats(profileId: string, viewerId: string): Promise<ProfileStats> {
+// One request (profile_stats), seen from the logged-in member's side. The post
+// count goes through RLS, so it's 0 for people who can't see their posts.
+export async function getProfileStats(profileId: string): Promise<ProfileStats> {
   const supabase = await createClient();
-
-  const [posts, followers, following, isFollowing, followsMe, requested, requestedMe, block] = await Promise.all([
-    supabase
-      .from("posts")
-      .select("id", { count: "exact", head: true })
-      .eq("author_id", profileId)
-      .gt("expires_at", new Date().toISOString()),
-    supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", profileId),
-    supabase.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", profileId),
-    supabase
-      .from("follows")
-      .select("*", { count: "exact", head: true })
-      .eq("follower_id", viewerId)
-      .eq("following_id", profileId),
-    supabase
-      .from("follows")
-      .select("*", { count: "exact", head: true })
-      .eq("follower_id", profileId)
-      .eq("following_id", viewerId),
-    supabase
-      .from("follow_requests")
-      .select("*", { count: "exact", head: true })
-      .eq("requester_id", viewerId)
-      .eq("target_id", profileId),
-    supabase
-      .from("follow_requests")
-      .select("*", { count: "exact", head: true })
-      .eq("requester_id", profileId)
-      .eq("target_id", viewerId),
-    supabase.rpc("block_status", { p_other: profileId }),
-  ]);
+  const { data } = await supabase.rpc("profile_stats", { p_profile: profileId }).single();
 
   return {
-    posts: posts.count ?? 0,
-    followers: followers.count ?? 0,
-    following: following.count ?? 0,
-    isFollowing: (isFollowing.count ?? 0) > 0,
-    followsMe: (followsMe.count ?? 0) > 0,
-    requested: (requested.count ?? 0) > 0,
-    requestedMe: (requestedMe.count ?? 0) > 0,
-    blockStatus: (block.data as BlockStatus) ?? null,
+    posts: data?.posts ?? 0,
+    followers: data?.followers ?? 0,
+    following: data?.following ?? 0,
+    isFollowing: data?.is_following ?? false,
+    followsMe: data?.follows_me ?? false,
+    requested: data?.requested ?? false,
+    requestedMe: data?.requested_me ?? false,
+    blockStatus: (data?.block_status as BlockStatus) ?? null,
   };
 }
 
@@ -122,14 +94,14 @@ export async function getBlockedProfiles(userId: string): Promise<ProfileListIte
 export type GridPost = {
   id: string;
   created_at: string;
-  images: { path: string; width: number; height: number; position: number }[];
+  images: { path: string; thumb_path: string | null; width: number; height: number; position: number }[];
 };
 
 export async function getProfilePosts(profileId: string): Promise<GridPost[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("posts")
-    .select("id, created_at, images:post_images(path, width, height, position)")
+    .select("id, created_at, images:post_images(path, thumb_path, width, height, position)")
     .eq("author_id", profileId)
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })

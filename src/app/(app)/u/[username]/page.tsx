@@ -23,14 +23,17 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
   if (!profile) notFound(); // also what someone who blocked you sees
 
   const isMe = me.id === profile.id;
-  const stats = await getProfileStats(profile.id, me.id);
+  // Content is fetched alongside the stats rather than after them: RLS returns
+  // posts and highlights only to people allowed to see them (empty otherwise).
+  const [stats, posts, highlights] = await Promise.all([
+    getProfileStats(profile.id),
+    getProfilePosts(profile.id),
+    getHighlights(profile.id),
+  ]);
   const blockedByMe = stats.blockStatus === "by_me" || stats.blockStatus === "both";
 
   // Everyone's account is private: content only for approved followers (or yourself / admin).
   const canSee = isMe || me.is_admin || (stats.isFollowing && !blockedByMe);
-  const [posts, highlights] = canSee
-    ? await Promise.all([getProfilePosts(profile.id), getHighlights(profile.id)])
-    : [[], []];
 
   const followState = stats.isFollowing ? "following" : stats.requested ? "requested" : "none";
 

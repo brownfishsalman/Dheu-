@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/Avatar";
 import { Carousel } from "@/components/post/Carousel";
 import { timeAgo, expiresIn } from "@/lib/time";
+import { postImageFiles } from "@/lib/storage";
 import type { FeedPost } from "@/lib/data/posts";
 
 export type Viewer = { id: string; isAdmin: boolean };
@@ -65,7 +66,7 @@ export function PostCard({ post, viewer, detail = false, priority, onDeleted, de
     setMenuOpen(false);
     if (!confirm("Delete this post? This can't be undone.")) return;
     const supabase = createClient();
-    await supabase.storage.from("posts").remove(post.images.map((i) => i.path));
+    await supabase.storage.from("posts").remove(postImageFiles(post.images));
     const { error } = await supabase.from("posts").delete().eq("id", post.id);
     if (error) return alert("Couldn't delete the post.");
     if (deleteRedirect) router.replace(deleteRedirect);

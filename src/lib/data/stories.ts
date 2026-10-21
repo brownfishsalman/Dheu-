@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/database.types";
 
@@ -112,7 +113,8 @@ export type HighlightDetail = {
   stories: StoryItem[];
 };
 
-export async function getHighlight(highlightId: string): Promise<HighlightDetail | null> {
+// cache(): generateMetadata and the page both ask for the same highlight in one request.
+export const getHighlight = cache(async (highlightId: string): Promise<HighlightDetail | null> => {
   const supabase = await createClient();
   const { data } = await supabase
     .from("story_highlights")
@@ -131,7 +133,7 @@ export async function getHighlight(highlightId: string): Promise<HighlightDetail
     .map((s) => ({ ...s, seen: true }));
 
   return { id: data.id, title: data.title, owner: data.owner, stories };
-}
+});
 
 // All of my stories that can still be added to a highlight (active or already highlighted).
 export async function getMyStoriesForHighlights(userId: string) {

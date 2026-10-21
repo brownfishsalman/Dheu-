@@ -10,3 +10,8 @@ export function publicUrl(bucket: Bucket, path: string | null | undefined): stri
 export function avatarUrl(path: string | null | undefined): string | null {
   return publicUrl("avatars", path);
 }
+
+// Every "posts" bucket file behind these images: the photo plus its thumbnail, if it has one.
+export function postImageFiles(images: { path: string; thumb_path: string | null }[]): string[] {
+  return images.flatMap((i) => (i.thumb_path ? [i.path, i.thumb_path] : [i.path]));
+}

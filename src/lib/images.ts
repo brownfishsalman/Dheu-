@@ -11,6 +11,8 @@ export type ProcessedImage = {
 };
 
 export const POST_MAX = { maxW: 1080, maxH: 1920, quality: 0.9 };
+// Square grid tile: ~3x the largest tile's CSS size, so it stays sharp on phones.
+export const POST_THUMB = { maxW: 480, maxH: 480, quality: 0.8, square: true };
 export const STORY_MAX = { maxW: 1080, maxH: 1920, quality: 0.9 };
 export const AVATAR_MAX = { maxW: 320, maxH: 320, quality: 0.88, square: true };
 
@@ -54,7 +56,9 @@ function dims(src: ImageBitmap | HTMLImageElement) {
     : { w: src.width, h: src.height };
 }
 
-export async function processImage(file: File, opts: Options): Promise<ProcessedImage> {
+type Source = ImageBitmap | HTMLImageElement;
+
+async function load(file: File): Promise<Source> {
   if (!ACCEPTED.includes(file.type) && !looksHeic(file) && !file.type.startsWith("image/")) {
     throw new Error("That file isn't an image.");
   }
@@ -62,9 +66,21 @@ export async function processImage(file: File, opts: Options): Promise<Processed
   const decodable = await toDecodable(file);
   const source = await decode(decodable);
   const { w, h } = dims(source);
-  if (!w || !h) throw new Error("Couldn't read that image.");
+  if (!w || !h) {
+    release(source);
+    throw new Error("Couldn't read that image.");
+  }
+  return source;
+}
 
-  // Source rectangle (center-crop only for square avatars)
+function release(source: Source) {
+  if ("close" in source) source.close();
+}
+
+async function render(source: Source, opts: Options): Promise<{ blob: Blob; width: number; height: number }> {
+  const { w, h } = dims(source);
+
+  // Source rectangle (center-crop only for square avatars and thumbnails)
   let sx = 0, sy = 0, sw = w, sh = h;
   if (opts.square) {
     const side = Math.min(w, h);
@@ -87,16 +103,44 @@ export async function processImage(file: File, opts: Options): Promise<Processed
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, outW, outH);
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, outW, outH);
-  if ("close" in source) source.close();
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", opts.quality ?? 0.9),
   );
   if (!blob) throw new Error("Couldn't encode the image.");
 
-  return { blob, width: outW, height: outH, previewUrl: URL.createObjectURL(blob) };
+  return { blob, width: outW, height: outH };
+}
+
+export async function processImage(file: File, opts: Options): Promise<ProcessedImage> {
+  const source = await load(file);
+  try {
+    const out = await render(source, opts);
+    return { ...out, previewUrl: URL.createObjectURL(out.blob) };
+  } finally {
+    release(source);
+  }
+}
+
+// A post photo plus its square grid thumbnail, both cut from one decode.
+export type ProcessedPostImage = ProcessedImage & { thumb: Blob };
+
+export async function processPostImage(file: File): Promise<ProcessedPostImage> {
+  const source = await load(file);
+  try {
+    const out = await render(source, POST_MAX);
+    const thumb = await render(source, POST_THUMB);
+    return { ...out, previewUrl: URL.createObjectURL(out.blob), thumb: thumb.blob };
+  } finally {
+    release(source);
+  }
 }
 
 export function newImagePath(userId: string) {
   return `${userId}/${crypto.randomUUID()}.jpg`;
+}
+
+// "<user>/<uuid>.jpg" → "<user>/<uuid>-thumb.jpg", so a thumbnail sits next to its photo.
+export function thumbPathFor(path: string) {
+  return path.replace(/\.jpg$/, "-thumb.jpg");
 }

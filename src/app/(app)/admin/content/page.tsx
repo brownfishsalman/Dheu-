@@ -11,7 +11,7 @@ export default async function AdminContentPage() {
   const [{ data: posts }, { data: stories }] = await Promise.all([
     admin
       .from("posts")
-      .select("id, caption, created_at, author:profiles!posts_author_id_fkey(username), images:post_images(path, position)")
+      .select("id, caption, created_at, author:profiles!posts_author_id_fkey(username), images:post_images(path, thumb_path, position)")
       .gt("expires_at", now)
       .order("created_at", { ascending: false })
       .limit(60),
@@ -22,13 +22,16 @@ export default async function AdminContentPage() {
       .order("created_at", { ascending: false }),
   ]);
 
-  const adminPosts: AdminPost[] = (posts ?? []).map((p) => ({
-    id: p.id,
-    caption: p.caption,
-    created_at: p.created_at,
-    username: p.author?.username ?? "?",
-    cover: [...p.images].sort((a, b) => a.position - b.position)[0]?.path ?? null,
-  }));
+  const adminPosts: AdminPost[] = (posts ?? []).map((p) => {
+    const first = [...p.images].sort((a, b) => a.position - b.position)[0];
+    return {
+      id: p.id,
+      caption: p.caption,
+      created_at: p.created_at,
+      username: p.author?.username ?? "?",
+      cover: first ? (first.thumb_path ?? first.path) : null, // 56 px tile: thumbnail when there is one
+    };
+  });
 
   const adminStories: AdminStory[] = (stories ?? []).map((s) => ({
     id: s.id,

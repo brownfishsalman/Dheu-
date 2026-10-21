@@ -34,18 +34,23 @@ export function BadgeProvider({
   const [counts, setCounts] = useState<Counts>(initial);
   const pathname = usePathname();
 
+  // One request (badge_counts) for both numbers. A failed refresh keeps the
+  // last known counts rather than blanking the badges.
   const refresh = useCallback(async () => {
-    const supabase = createClient();
-    const [{ data: unread }, { data: ann }, { count }] = await Promise.all([
-      supabase.rpc("unread_counts"),
-      supabase.rpc("unread_announcement_count"),
-      supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", userId).is("read_at", null),
-    ]);
-    setCounts({
-      messages: (unread ?? []).reduce((sum, row) => sum + Number(row.unread), 0) + (ann ?? 0),
-      activity: count ?? 0,
-    });
-  }, [userId]);
+    const { data } = await createClient().rpc("badge_counts").single();
+    if (data) setCounts({ messages: data.messages, activity: data.activity });
+  }, []);
+
+  // Realtime events come in bursts (several messages at once, a batch of
+  // notification deletes), so collapse each burst into a single refresh.
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshSoon = useCallback(() => {
+    if (pending.current) return;
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      refresh();
+    }, 300);
+  }, [refresh]);
 
   // Re-check after every navigation (e.g. leaving a chat marks it read).
   const firstPath = useRef(pathname);
@@ -61,23 +66,27 @@ export function BadgeProvider({
     window.addEventListener(ACTIVITY_READ_EVENT, refresh);
     window.addEventListener(BADGES_REFRESH_EVENT, refresh);
 
+    // Realtime can't filter DELETE events (or check RLS on them), so every
+    // member hears about every deleted notification; refreshSoon keeps that cheap.
     const channel = supabase
       .channel(`badges:${userId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => refresh())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, () => refresh())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, () => refresh())
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "notifications" }, () => refresh());
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, refreshSoon)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, refreshSoon)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, refreshSoon)
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "notifications" }, refreshSoon);
     ensureRealtimeAuth(supabase).then(() => {
       if (!cancelled) channel.subscribe();
     });
 
     return () => {
       cancelled = true;
+      if (pending.current) clearTimeout(pending.current);
+      pending.current = null;
       window.removeEventListener(ACTIVITY_READ_EVENT, refresh);
       window.removeEventListener(BADGES_REFRESH_EVENT, refresh);
       supabase.removeChannel(channel);
     };
-  }, [userId, refresh]);
+  }, [userId, refresh, refreshSoon]);
 
   return <BadgeContext.Provider value={{ ...counts, refresh }}>{children}</BadgeContext.Provider>;
 }

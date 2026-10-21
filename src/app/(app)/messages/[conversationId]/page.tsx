@@ -20,9 +20,9 @@ export async function generateMetadata(props: PageProps<"/messages/[conversation
 export default async function ConversationPage(props: PageProps<"/messages/[conversationId]">) {
   const { conversationId } = await props.params;
   const me = await requireProfile();
-  const conv = await getConversation(conversationId, me.id);
+  // Messages load alongside the conversation: RLS only returns them to members.
+  const [conv, messages] = await Promise.all([getConversation(conversationId, me.id), getMessages(conversationId)]);
   if (!conv) notFound();
-  const messages = await getMessages(conv.id);
 
   // People who have left the group but are still named here — as senders, or
   // in system lines ("Salman removed Tania").

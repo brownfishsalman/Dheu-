@@ -10,7 +10,8 @@ export function PostGrid({ posts }: { posts: GridPost[] }) {
     <ul className="grid grid-cols-3 gap-0.5 sm:gap-1">
       {posts.map((post) => {
         const cover = post.images[0];
-        const src = cover ? publicUrl("posts", cover.path) : null;
+        // Small square thumbnail; posts from before thumbnails existed use the full image.
+        const src = cover ? publicUrl("posts", cover.thumb_path ?? cover.path) : null;
         return (
           <li key={post.id} className="relative aspect-square overflow-hidden bg-surface-2">
             <Link href={`/p/${post.id}`} className="block h-full w-full">

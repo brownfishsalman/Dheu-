@@ -4,11 +4,11 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus, X, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { processImage, POST_MAX, ACCEPT_ATTR, newImagePath, type ProcessedImage } from "@/lib/images";
+import { processPostImage, ACCEPT_ATTR, newImagePath, thumbPathFor, type ProcessedPostImage } from "@/lib/images";
 
 const MAX_IMAGES = 10;
 
-type Picked = ProcessedImage & { key: string };
+type Picked = ProcessedPostImage & { key: string };
 
 export function NewPostForm({ userId }: { userId: string }) {
   const router = useRouter();
@@ -32,7 +32,7 @@ export function NewPostForm({ userId }: { userId: string }) {
     setProcessing(Math.min(files.length, room));
     for (const file of files.slice(0, room)) {
       try {
-        const img = await processImage(file, POST_MAX);
+        const img = await processPostImage(file);
         setImages((prev) => [...prev, { ...img, key: crypto.randomUUID() }]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't read one of the images.");
@@ -69,16 +69,25 @@ export function NewPostForm({ userId }: { userId: string }) {
     setPosting(true);
 
     const supabase = createClient();
-    const uploaded: string[] = [];
+    const uploaded: string[] = []; // every file put in Storage, removed again if posting fails
+    const files: { path: string; thumb_path: string }[] = [];
+
+    async function put(path: string, blob: Blob) {
+      const { error: upErr } = await supabase.storage
+        .from("posts")
+        .upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000" });
+      if (upErr) throw new Error(upErr.message);
+      uploaded.push(path);
+    }
+
     try {
       for (let i = 0; i < images.length; i++) {
         setProgress(`Uploading ${i + 1} of ${images.length}…`);
         const path = newImagePath(userId);
-        const { error: upErr } = await supabase.storage
-          .from("posts")
-          .upload(path, images[i].blob, { contentType: "image/jpeg", cacheControl: "31536000" });
-        if (upErr) throw new Error(upErr.message);
-        uploaded.push(path);
+        const thumb_path = thumbPathFor(path);
+        await put(path, images[i].blob);
+        await put(thumb_path, images[i].thumb);
+        files.push({ path, thumb_path });
       }
 
       setProgress("Publishing…");
@@ -92,7 +101,8 @@ export function NewPostForm({ userId }: { userId: string }) {
       const { error: imgErr } = await supabase.from("post_images").insert(
         images.map((img, i) => ({
           post_id: post.id,
-          path: uploaded[i],
+          path: files[i].path,
+          thumb_path: files[i].thumb_path,
           width: img.width,
           height: img.height,
           position: i,

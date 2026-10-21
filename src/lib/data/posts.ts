@@ -1,11 +1,12 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/database.types";
 import { FEED_PAGE_SIZE } from "@/lib/constants";
 
 export type PostAuthor = Pick<Profile, "id" | "username" | "full_name" | "avatar_path">;
 
-export type FeedImage = { id: string; path: string; width: number; height: number; position: number };
+export type FeedImage = { id: string; path: string; thumb_path: string | null; width: number; height: number; position: number };
 
 export type FeedPost = {
   id: string;
@@ -21,7 +22,7 @@ export type FeedPost = {
 };
 
 const FEED_SELECT =
-  "id, author_id, caption, created_at, expires_at, like_count, comment_count, liked_by_me, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_path), images:post_images(id, path, width, height, position)";
+  "id, author_id, caption, created_at, expires_at, like_count, comment_count, liked_by_me, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_path), images:post_images(id, path, thumb_path, width, height, position)";
 
 
 type RawFeedRow = {
@@ -43,17 +44,14 @@ function normalize(rows: RawFeedRow[]): FeedPost[] {
     .map((r) => ({ ...r, images: [...r.images].sort((a, b) => a.position - b.position) }));
 }
 
-// Chronological feed of people I follow + me. Cursor = created_at of the last post seen.
-export async function getFeedPage(
-  viewerId: string,
-  followingIds: string[],
-  before?: string,
-): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+// Chronological feed of people I follow + me. The home_feed view picks those
+// authors from the session itself, so this needn't wait for the following list.
+// Cursor = created_at of the last post seen.
+export async function getFeedPage(before?: string): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
   const supabase = await createClient();
   let q = supabase
-    .from("post_feed")
+    .from("home_feed")
     .select(FEED_SELECT)
-    .in("author_id", [viewerId, ...followingIds])
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(FEED_PAGE_SIZE + 1);
@@ -66,12 +64,13 @@ export async function getFeedPage(
   return { posts, nextCursor: hasMore ? posts[posts.length - 1].created_at : null };
 }
 
-export async function getPost(id: string): Promise<FeedPost | null> {
+// cache(): generateMetadata and the page both ask for the same post in one request.
+export const getPost = cache(async (id: string): Promise<FeedPost | null> => {
   const supabase = await createClient();
   const { data } = await supabase.from("post_feed").select(FEED_SELECT).eq("id", id).maybeSingle();
   if (!data) return null;
   return normalize([data as RawFeedRow])[0] ?? null;
-}
+});
 
 export type CommentItem = {
   id: string;

@@ -23,7 +23,7 @@ export async function getNotifications(userId: string, limit = 100): Promise<Not
   const { data } = await supabase
     .from("notifications")
     .select(
-      "id, type, read_at, created_at, post_id, story_id, actor:profiles!notifications_actor_id_fkey(id, username, full_name, avatar_path), post:posts(images:post_images(path, position)), comment:comments(body), story:stories(image_path)",
+      "id, type, read_at, created_at, post_id, story_id, actor:profiles!notifications_actor_id_fkey(id, username, full_name, avatar_path), post:posts(images:post_images(path, thumb_path, position)), comment:comments(body), story:stories(image_path)",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
@@ -32,7 +32,8 @@ export async function getNotifications(userId: string, limit = 100): Promise<Not
   const out: NotificationItem[] = [];
   for (const n of data ?? []) {
     if (!n.actor) continue;
-    const cover = n.post ? [...n.post.images].sort((a, b) => a.position - b.position)[0]?.path ?? null : null;
+    const first = n.post ? [...n.post.images].sort((a, b) => a.position - b.position)[0] : undefined;
+    const cover = first ? (first.thumb_path ?? first.path) : null; // small tile: thumbnail when there is one
     out.push({
       id: n.id,
       type: n.type,

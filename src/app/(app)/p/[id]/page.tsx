@@ -14,9 +14,9 @@ export async function generateMetadata(props: PageProps<"/p/[id]">): Promise<Met
 
 export default async function PostPage(props: PageProps<"/p/[id]">) {
   const { id } = await props.params;
-  const [me, post] = await Promise.all([requireProfile(), getPost(id)]);
+  // Comments load alongside the post: RLS only returns them if the post is visible.
+  const [me, post, comments] = await Promise.all([requireProfile(), getPost(id), getComments(id)]);
   if (!post) notFound();
-  const comments = await getComments(post.id);
 
   const viewer = {
     id: me.id,

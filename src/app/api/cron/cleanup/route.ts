@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { postImageFiles } from "@/lib/storage";
 
 // Runs daily (see vercel.json). Deletes expired posts and stories together
 // with their image files so storage is reclaimed. Protected by CRON_SECRET,
@@ -17,13 +18,13 @@ export async function GET(request: Request) {
   // ---- expired posts -------------------------------------------------
   const { data: posts, error: pErr } = await admin
     .from("posts")
-    .select("id, images:post_images(path)")
+    .select("id, images:post_images(path, thumb_path)")
     .lte("expires_at", now)
     .limit(500);
   if (pErr) report.errors.push(`posts: ${pErr.message}`);
 
   if (posts && posts.length > 0) {
-    const paths = posts.flatMap((p) => p.images.map((i) => i.path));
+    const paths = posts.flatMap((p) => postImageFiles(p.images));
     for (let i = 0; i < paths.length; i += 100) {
       const { error } = await admin.storage.from("posts").remove(paths.slice(i, i + 100));
       if (error) report.errors.push(`post files: ${error.message}`);
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
     if (error) report.errors.push(`post rows: ${error.message}`);
     else {
       report.posts = posts.length;
-      report.postImages = paths.length;
+      report.postImages = posts.reduce((n, p) => n + p.images.length, 0);
     }
   }
 

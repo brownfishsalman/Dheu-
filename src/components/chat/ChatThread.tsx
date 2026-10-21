@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Send, Loader2, ImagePlus, X, Reply, Clock, Mic, Square, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ensureRealtimeAuth } from "@/lib/supabase/realtime";
@@ -213,10 +213,10 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
     }
   }
 
-  function startReply(m: ChatMessage) {
+  const startReply = useCallback((m: ChatMessage) => {
     setReplyTo(m);
     inputRef.current?.focus();
-  }
+  }, []);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -299,8 +299,52 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
     });
   }
 
-  const byId = new Map(messages.map((m) => [m.id, m]));
   const canSend = blocked === null;
+
+  // Typing in the composer re-renders this component on every keystroke. Build
+  // the (possibly long) message list only when its inputs change, so React can
+  // skip it entirely while someone types.
+  const list = useMemo(() => {
+    const byId = new Map(messages.map((m) => [m.id, m]));
+    return messages.map((m, i) => {
+      const mine = m.sender_id === meId;
+      const prev = messages[i - 1];
+      const next = messages[i + 1];
+      const showDay = !prev || !sameDay(prev.created_at, m.created_at);
+      if (m.kind === "system") {
+        return (
+          <div key={m.id}>
+            {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
+            <p className="my-2 px-6 text-center text-xs text-ink-faint" title={clock(m.created_at)}>
+              {systemText(m, nameOf)}
+            </p>
+          </div>
+        );
+      }
+      // Consecutive bubbles from one person within 5 minutes form a run; a
+      // day change or a system line breaks it.
+      const grouped = prev && prev.kind !== "system" && prev.sender_id === m.sender_id && !showDay &&
+        new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60_000;
+      // In groups: name above the first bubble of a run, avatar beside the last.
+      const endOfRun = !next || next.kind === "system" || next.sender_id !== m.sender_id || !sameDay(m.created_at, next.created_at) ||
+        new Date(next.created_at).getTime() - new Date(m.created_at).getTime() >= 5 * 60_000;
+      return (
+        <div key={m.id}>
+          {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
+          <Bubble
+            m={m}
+            mine={mine}
+            grouped={grouped}
+            sender={isGroup && !mine ? { name: nameOf(m.sender_id), avatar: people.get(m.sender_id) ?? null, showName: !grouped, showAvatar: endOfRun } : null}
+            nameOf={nameOf}
+            onReply={canSend ? () => startReply(m) : undefined}
+            onOpenImage={setLightbox}
+            scrollToReply={(id) => byId.has(id) && document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          />
+        </div>
+      );
+    });
+  }, [messages, meId, isGroup, people, nameOf, canSend, startReply]);
 
   return (
     <div className="flex h-[calc(100dvh-3.5rem-3rem-3.5rem-env(safe-area-inset-bottom))] flex-col md:h-[calc(100dvh-3.5rem)]">
@@ -331,44 +375,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
           </div>
         )}
 
-        {messages.map((m, i) => {
-          const mine = m.sender_id === meId;
-          const prev = messages[i - 1];
-          const next = messages[i + 1];
-          const showDay = !prev || !sameDay(prev.created_at, m.created_at);
-          if (m.kind === "system") {
-            return (
-              <div key={m.id}>
-                {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
-                <p className="my-2 px-6 text-center text-xs text-ink-faint" title={clock(m.created_at)}>
-                  {systemText(m, nameOf)}
-                </p>
-              </div>
-            );
-          }
-          // Consecutive bubbles from one person within 5 minutes form a run; a
-          // day change or a system line breaks it.
-          const grouped = prev && prev.kind !== "system" && prev.sender_id === m.sender_id && !showDay &&
-            new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60_000;
-          // In groups: name above the first bubble of a run, avatar beside the last.
-          const endOfRun = !next || next.kind === "system" || next.sender_id !== m.sender_id || !sameDay(m.created_at, next.created_at) ||
-            new Date(next.created_at).getTime() - new Date(m.created_at).getTime() >= 5 * 60_000;
-          return (
-            <div key={m.id}>
-              {showDay && <div className="my-3 text-center text-xs font-medium text-ink-faint">{dayLabel(m.created_at)}</div>}
-              <Bubble
-                m={m}
-                mine={mine}
-                grouped={grouped}
-                sender={isGroup && !mine ? { name: nameOf(m.sender_id), avatar: people.get(m.sender_id) ?? null, showName: !grouped, showAvatar: endOfRun } : null}
-                nameOf={nameOf}
-                onReply={canSend ? () => startReply(m) : undefined}
-                onOpenImage={setLightbox}
-                scrollToReply={(id) => byId.has(id) && document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
-              />
-            </div>
-          );
-        })}
+        {list}
         <div ref={bottomRef} />
       </div>
 

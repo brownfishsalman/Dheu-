@@ -7,7 +7,7 @@ import { BadgeProvider } from "@/components/nav/BadgeProvider";
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const userId = await getUserId();
   if (!userId) redirect("/login");
-  const [profile, counts] = await Promise.all([requireProfile(), getBadgeCounts(userId)]);
+  const [profile, counts] = await Promise.all([requireProfile(), getBadgeCounts()]);
 
   return (
     <BadgeProvider userId={userId} initial={counts}>

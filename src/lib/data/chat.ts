@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile, MessageKind } from "@/lib/database.types";
 import type { SystemEvent } from "@/lib/chat-events";
@@ -86,7 +87,8 @@ export type ConversationInfo = {
   blocked: BlockStatus; // DMs only (groups: null)
 };
 
-export async function getConversation(id: string, meId: string): Promise<ConversationInfo | null> {
+// cache(): generateMetadata and the page both ask for the same conversation in one request.
+export const getConversation = cache(async (id: string, meId: string): Promise<ConversationInfo | null> => {
   const supabase = await createClient();
   const { data } = await supabase
     .from("conversations")
@@ -113,7 +115,7 @@ export async function getConversation(id: string, meId: string): Promise<Convers
     ownerId: null,
     blocked: (blocked as BlockStatus) ?? null,
   };
-}
+});
 
 // Members' profiles for a set of ids (people who left a group but whose
 // messages remain). RLS hides anyone who blocked me; they come back missing.

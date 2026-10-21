@@ -162,6 +162,7 @@ export type Database = {
           id: string;
           post_id: string;
           path: string;
+          thumb_path: string | null; // square grid thumbnail; null on posts from before 0013
           width: number;
           height: number;
           position: number;
@@ -170,6 +171,7 @@ export type Database = {
           id?: string;
           post_id: string;
           path: string;
+          thumb_path?: string | null;
           width: number;
           height: number;
           position?: number;
@@ -178,6 +180,7 @@ export type Database = {
           id?: string;
           post_id?: string;
           path?: string;
+          thumb_path?: string | null;
           width?: number;
           height?: number;
           position?: number;
@@ -195,6 +198,13 @@ export type Database = {
             columns: ["post_id"];
             isOneToOne: false;
             referencedRelation: "post_feed";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "post_images_post_id_fkey";
+            columns: ["post_id"];
+            isOneToOne: false;
+            referencedRelation: "home_feed";
             referencedColumns: ["id"];
           },
         ];
@@ -216,6 +226,13 @@ export type Database = {
             columns: ["post_id"];
             isOneToOne: false;
             referencedRelation: "post_feed";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "post_likes_post_id_fkey";
+            columns: ["post_id"];
+            isOneToOne: false;
+            referencedRelation: "home_feed";
             referencedColumns: ["id"];
           },
           {
@@ -262,6 +279,13 @@ export type Database = {
             columns: ["post_id"];
             isOneToOne: false;
             referencedRelation: "post_feed";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "comments_post_id_fkey";
+            columns: ["post_id"];
+            isOneToOne: false;
+            referencedRelation: "home_feed";
             referencedColumns: ["id"];
           },
           {
@@ -643,6 +667,13 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "notifications_post_id_fkey";
+            columns: ["post_id"];
+            isOneToOne: false;
+            referencedRelation: "home_feed";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "notifications_comment_id_fkey";
             columns: ["comment_id"];
             isOneToOne: false;
@@ -831,6 +862,28 @@ export type Database = {
           },
         ];
       };
+      // post_feed narrowed to my posts + people I follow (keyed off the session)
+      home_feed: {
+        Row: {
+          id: string;
+          author_id: string;
+          caption: string;
+          created_at: string;
+          expires_at: string;
+          like_count: number;
+          comment_count: number;
+          liked_by_me: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "posts_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Functions: {
       is_admin: { Args: Record<string, never>; Returns: boolean };
@@ -860,6 +913,24 @@ export type Database = {
       remove_group_member: { Args: { p_conversation_id: string; p_user_id: string }; Returns: undefined };
       rename_group: { Args: { p_conversation_id: string; p_title: string }; Returns: undefined };
       delete_empty_groups: { Args: Record<string, never>; Returns: number };
+      // always exactly one row: call with .single()
+      badge_counts: {
+        Args: Record<string, never>;
+        Returns: { messages: number; activity: number }[];
+      };
+      profile_stats: {
+        Args: { p_profile: string };
+        Returns: {
+          posts: number;
+          followers: number;
+          following: number;
+          is_following: boolean;
+          follows_me: boolean;
+          requested: boolean;
+          requested_me: boolean;
+          block_status: string | null;
+        }[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireProfile } from "@/lib/data/session";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { postImageFiles } from "@/lib/storage";
 
 export type ActionResult = { ok: true; message?: string; secret?: string } | { ok: false; error: string };
 
@@ -124,9 +125,9 @@ export async function deleteMember(userId: string): Promise<ActionResult> {
 export async function adminDeletePost(postId: string): Promise<ActionResult> {
   await assertAdmin();
   const admin = createAdminClient();
-  const { data: images } = await admin.from("post_images").select("path").eq("post_id", postId);
+  const { data: images } = await admin.from("post_images").select("path, thumb_path").eq("post_id", postId);
   if (images && images.length > 0) {
-    await admin.storage.from("posts").remove(images.map((i) => i.path));
+    await admin.storage.from("posts").remove(postImageFiles(images));
   }
   const { error } = await admin.from("posts").delete().eq("id", postId);
   if (error) return { ok: false, error: error.message };

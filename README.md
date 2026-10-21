@@ -16,7 +16,7 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres%20%C2%B7%20Auth%20%C2%B7%20Storage%20%C2%B7%20Realtime-3ecf8e?style=flat-square&logo=supabase&logoColor=white" />
   <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind_CSS-4-06b6d4?style=flat-square&logo=tailwindcss&logoColor=white" />
-  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-00273d?style=flat-square" />
+  <img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-00273d?style=flat-square" />
 </p>
 
 ---
@@ -115,8 +115,8 @@ flowchart LR
 ## Running it yourself
 
 ```bash
-git clone https://github.com/brownfishsalman/Dheu.git
-cd Dheu
+git clone https://github.com/brownfishsalman/Dheu-.git
+cd Dheu-
 npm install
 cp .env.example .env.local   # fill in your Supabase URL + keys
 npm run dev
@@ -153,4 +153,4 @@ scripts/build-logo.mjs     regenerates icons from the original logo artwork
 
 ## License
 
-[MIT](LICENSE) © Salman Saadiq. The logo and the name *Dheu* are not covered by the licence.
+[GPL-3.0](LICENSE) © Salman Saadiq. The logo and the name *Dheu* are not covered by the licence.

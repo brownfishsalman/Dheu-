@@ -55,7 +55,8 @@ object Activity {
     /**
      * Anything that may change a badge: new messages or unsends, announcements,
      * my notifications appearing, any notification removed (DELETE events can't
-     * be filtered, so callers should debounce).
+     * be filtered, so callers should debounce). Also fires when the channel
+     * rejoins after a gap, since events may have been missed.
      */
     fun badgeEvents(me: String): Flow<Unit> = channelFlow {
         val channel = client.channel("badges:$me")
@@ -69,7 +70,7 @@ object Activity {
             },
             channel.postgresChangeFlow<PostgresAction.Delete>("public") { table = "notifications" },
         )
-        launch { merge(*flows.toTypedArray()).collect { send(Unit) } }
+        launch { merge(*flows.toTypedArray(), rejoins(channel)).collect { send(Unit) } }
         channel.subscribe()
         try {
             awaitCancellation()

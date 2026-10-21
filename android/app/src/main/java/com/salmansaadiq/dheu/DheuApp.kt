@@ -8,8 +8,14 @@ import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.salmansaadiq.dheu.data.LiveConnection
 
 class DheuApp : Application(), SingletonImageLoader.Factory {
+    override fun onCreate() {
+        super.onCreate()
+        LiveConnection.install()
+    }
+
     // Photos sit at unique, never-rewritten paths, so a generous disk cache is safe.
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)

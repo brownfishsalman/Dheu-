@@ -36,6 +36,8 @@ data class MessageInsert(
 sealed interface ChatEvent {
     data class Inserted(val id: String) : ChatEvent
     data class Deleted(val id: String) : ChatEvent
+    /** The channel joined again after a gap; reload to catch up. */
+    data object Rejoined : ChatEvent
 }
 
 object Chat {
@@ -186,6 +188,7 @@ object Chat {
         val deletes = channel.postgresChangeFlow<PostgresAction.Delete>("public") { table = "messages" }
         launch { inserts.collect { a -> a.record.string("id")?.let { send(ChatEvent.Inserted(it)) } } }
         launch { deletes.collect { a -> a.oldRecord.string("id")?.let { send(ChatEvent.Deleted(it)) } } }
+        launch { rejoins(channel).collect { send(ChatEvent.Rejoined) } }
         channel.subscribe()
         try {
             awaitCancellation()

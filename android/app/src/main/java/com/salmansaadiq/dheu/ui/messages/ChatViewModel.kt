@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.salmansaadiq.dheu.core.parseInstant
 import com.salmansaadiq.dheu.data.Chat
 import com.salmansaadiq.dheu.data.ChatEvent
 import com.salmansaadiq.dheu.data.ConversationInfo
@@ -47,6 +48,7 @@ class ChatViewModel(private val conversationId: String, private val me: String) 
                 when (event) {
                     is ChatEvent.Inserted -> onInserted(event.id)
                     is ChatEvent.Deleted -> removeLocally(event.id)
+                    ChatEvent.Rejoined -> catchUp()
                 }
             }
         }
@@ -93,6 +95,24 @@ class ChatViewModel(private val conversationId: String, private val me: String) 
         learnNames(listOf(full))
         if (messages.none { it.id == id }) messages = messages + full
         if (full.senderId != me) markRead()
+    }
+
+    /**
+     * Realtime was away (dropped network, app in the background): reload the
+     * newest page, which brings in new messages and drops unsent ones, and keep
+     * any older history already loaded above it.
+     */
+    private suspend fun catchUp() {
+        if (loading) return
+        val latest = runCatching { Chat.messages(conversationId) }.getOrNull() ?: return
+        val complete = latest.size < Chat.PAGE
+        val from = latest.firstOrNull()?.let { parseInstant(it.createdAt) }
+        val older = if (complete || from == null) emptyList() else messages.filter { parseInstant(it.createdAt) < from }
+        val newFromOthers = latest.any { m -> m.senderId != me && messages.none { it.id == m.id } }
+        learnNames(latest)
+        messages = older + latest
+        if (complete) hasOlder = false
+        if (newFromOthers) markRead()
     }
 
     private fun removeLocally(id: String) {

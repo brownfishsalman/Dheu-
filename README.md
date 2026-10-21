@@ -6,7 +6,7 @@
 
 <p align="center">
   An invite-only, Instagram-style photo community for a small circle of people.<br/>
-  Private accounts, posts that fade after 30 days, 24-hour stories, real-time chat with disappearing photos,<br/>push notifications — running entirely on free tiers.
+  Public or private accounts, posts that fade after 3 months, 24-hour stories and notes, real-time chat with disappearing photos,<br/>push notifications — running entirely on free tiers.
 </p>
 
 <p align="center">
@@ -27,10 +27,11 @@
 
 | | |
 |---|---|
-| **Private by default** | Every account is private. Following is a request the other person accepts or declines from Activity; posts, stories and highlights are visible only to approved followers — enforced by the database, not just the UI. Blocking removes all ties both ways and hides each person from the other. |
-| **Posts** | 1–10 photos per post in a swipeable carousel, any aspect ratio, captions, likes (double-tap too), comments. Every post expires 30 days after it's shared. |
+| **Public or private** | Each member picks at sign-up (and can switch in Settings). Public: every member sees your posts, stories, highlights and followers, and following is instant. Private: following is a request accepted or declined from Activity, and content is visible only to approved followers. Going public approves pending requests. Enforced by the database, not just the UI. Blocking removes all ties both ways and hides each person from the other. |
+| **Posts** | 1–10 photos per post in a swipeable carousel, any aspect ratio, captions, likes (double-tap too), comments. Every post expires 3 months after it's shared. |
+| **Notes** | A 60-character thought above your avatar at the top of Messages for 24 hours, seen by mutual follows. Replies arrive as a DM that quotes the note. |
 | **Stories** | 24-hour photo stories with a full-screen viewer (progress bars, tap / hold / swipe gestures, keyboard on desktop), emoji reactions, text replies that land in chat, "seen by" list, and permanent Highlights on the profile. |
-| **Chat** | 1-to-1 and group messaging (up to 50 people, any member can add or rename, the creator can remove) delivered instantly over WebSockets; photos and voice messages (recorded in the browser, up to 2 minutes) that vanish after 7 days; swipe-to-reply with quoted messages; unread badges; a pinned read-only **announcements** thread from the admin in every inbox. |
+| **Chat** | 1-to-1 and group messaging (up to 50 people, any member can add or rename, the creator can remove) delivered instantly over WebSockets; photos and voice messages (recorded in the browser, up to 2 minutes) that vanish after 7 days; swipe-to-reply with quoted messages; unsend your own messages; delete a chat from your inbox (for you only); unread badges; a pinned read-only **announcements** thread from the admin in every inbox. |
 | **Activity & push** | Alerts for follow requests, accepted requests, likes, comments, new followers and story reactions — created by database triggers, shown with a live badge, and delivered as **Web Push notifications** to installed PWAs (Android, and iOS 16.4+ from the Home Screen). |
 | **Discovery** | People search, follower lists, and an admin-curated "Suggested for you" strip that appears in the feed now and then. |
 | **Photos** | Resized to 1080 px in the browser before upload, HEIC → JPEG conversion, EXIF orientation applied, GPS and other metadata stripped. |
@@ -97,7 +98,7 @@ flowchart LR
 
 **Images never touch a server.** The browser decodes the file (including HEIC via a WebAssembly build of libheif), fixes orientation, redraws it on a canvas at ≤ 1080 × 1920 — which also strips all metadata — and uploads the JPEG straight to Storage under `<userId>/<uuid>.jpg`. Storage policies only allow writes into your own folder.
 
-**Expiry is a timestamp.** `posts.expires_at` defaults to `now() + 30 days`; chat photos and voice messages are stamped `now() + 7 days` by a trigger on insert (the client never picks its own expiry); RLS hides expired rows instantly and a Vercel cron job (`/api/cron/cleanup`) removes rows and files nightly, keeping highlighted stories.
+**Expiry is a timestamp.** `posts.expires_at` defaults to `now() + 3 months`, notes to `now() + 24 hours`; chat photos and voice messages are stamped `now() + 7 days` by a trigger on insert (the client never picks its own expiry); RLS hides expired rows instantly and a Vercel cron job (`/api/cron/cleanup`) removes rows and files nightly, keeping highlighted stories.
 
 **Region matters.** Vercel functions are pinned next to the database (`vercel.json`); that alone cut page render time by roughly 4×. Badge counts are rendered on the server and kept fresh over one shared Realtime channel, and a `loading.tsx` skeleton makes navigation feel instant.
 
@@ -143,7 +144,7 @@ scripts/build-logo.mjs     regenerates icons from the original logo artwork
 
 ## Design notes
 
-- **Free-tier first.** 50 members, 1 GB of images. Resizing to 1080 px and expiring posts after 30 days keeps storage flat.
+- **Free-tier first.** 50 members, 1 GB of images. Resizing to 1080 px and expiring posts after 3 months keeps storage bounded.
 - **Public-read image URLs.** Files sit at unguessable paths in public buckets instead of signing every URL; a deliberate trade-off for simplicity in a trusted community.
 - **No email.** Free-tier SMTP can't reach arbitrary addresses, so sign-up needs no confirmation and password resets go through the admin.
 - **Region matters.** Moving Vercel's functions next to the database cut page render time by roughly 4× — see `vercel.json`.

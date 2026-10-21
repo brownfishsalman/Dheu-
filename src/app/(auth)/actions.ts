@@ -28,6 +28,7 @@ const signupSchema = z.object({
   email: z.email("Enter a valid email address"),
   password: z.string().min(8, "Use at least 8 characters").max(72, "Password is too long"),
   inviteCode: z.string().trim().toUpperCase(),
+  accountType: z.enum(["public", "private"], { error: "Choose a public or private account" }),
 });
 
 function fieldsOf(formData: FormData): Record<string, string> {
@@ -71,7 +72,7 @@ export async function signup(_prev: AuthState, formData: FormData): Promise<Auth
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, fields: fieldsOf(formData) };
   }
-  const { fullName, username, email, password, inviteCode } = parsed.data;
+  const { fullName, username, email, password, inviteCode, accountType } = parsed.data;
 
   const admin = createAdminClient();
 
@@ -119,7 +120,8 @@ export async function signup(_prev: AuthState, formData: FormData): Promise<Auth
     email,
     password,
     email_confirm: true,
-    user_metadata: { username, full_name: fullName, invite_code_id: inviteCodeId },
+    // is_private: read by handle_new_user (0016)
+    user_metadata: { username, full_name: fullName, invite_code_id: inviteCodeId, is_private: accountType === "private" },
   });
 
   if (createError) {

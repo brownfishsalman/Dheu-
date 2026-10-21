@@ -23,6 +23,7 @@ type MessageRow = {
   audio_path: string | null;
   kind: "text" | "system";
   event: { type: string; actor: string; targets?: string[]; title?: string } | null;
+  note_text?: string | null;
 };
 type AnnouncementRow = { id: string; body: string };
 
@@ -87,7 +88,8 @@ export async function POST(request: Request) {
       payload = { title: conv.title ?? "Group", body: `${sender} added you to the group`, url, tag };
     } else {
       recipients = conv.members.map((m) => m.user_id).filter((id) => id !== msg.sender_id && !(conv.is_group && blocked.has(id)));
-      const text = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
+      const content = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
+      const text = msg.note_text ? `Replied to your note: ${content}` : content;
       payload = conv.is_group
         ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url, tag }
         : { title: sender, body: text, url, tag };

@@ -71,6 +71,8 @@ export type Database = {
           banned_at: string | null;
           invite_code_id: string | null;
           created_at: string;
+          is_private: boolean;
+          privacy_chosen_at: string | null; // null: hasn't picked public/private yet (see 0016)
         };
         Insert: {
           id: string;
@@ -82,6 +84,8 @@ export type Database = {
           banned_at?: string | null;
           invite_code_id?: string | null;
           created_at?: string;
+          is_private?: boolean;
+          privacy_chosen_at?: string | null;
         };
         Update: {
           id?: string;
@@ -93,6 +97,8 @@ export type Database = {
           banned_at?: string | null;
           invite_code_id?: string | null;
           created_at?: string;
+          is_private?: boolean;
+          privacy_chosen_at?: string | null;
         };
         Relationships: [
           {
@@ -538,6 +544,7 @@ export type Database = {
           reply_to_id: string | null;
           kind: MessageKind;
           event: Json | null; // system lines only (see SystemEvent in lib/data/chat)
+          note_text: string | null; // a reply to a note keeps the note's text (see 0017)
           created_at: string;
         };
         Insert: {
@@ -554,6 +561,7 @@ export type Database = {
           reply_to_id?: string | null;
           kind?: MessageKind;
           event?: Json | null;
+          note_text?: string | null;
           created_at?: string;
         };
         Update: {
@@ -570,6 +578,7 @@ export type Database = {
           reply_to_id?: string | null;
           kind?: MessageKind;
           event?: Json | null;
+          note_text?: string | null;
           created_at?: string;
         };
         Relationships: [
@@ -819,9 +828,10 @@ export type Database = {
         ];
       };
       conversation_reads: {
-        Row: { conversation_id: string; user_id: string; last_read_at: string };
-        Insert: { conversation_id: string; user_id: string; last_read_at?: string };
-        Update: { conversation_id?: string; user_id?: string; last_read_at?: string };
+        // cleared_at: when this member deleted the chat (see 0019)
+        Row: { conversation_id: string; user_id: string; last_read_at: string; cleared_at: string | null };
+        Insert: { conversation_id: string; user_id: string; last_read_at?: string; cleared_at?: string | null };
+        Update: { conversation_id?: string; user_id?: string; last_read_at?: string; cleared_at?: string | null };
         Relationships: [
           {
             foreignKeyName: "conversation_reads_conversation_id_fkey";
@@ -834,6 +844,21 @@ export type Database = {
             foreignKeyName: "conversation_reads_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // one live note per member, 24 hours (see 0017); written through set_note
+      notes: {
+        Row: { author_id: string; body: string; created_at: string; expires_at: string };
+        Insert: { author_id: string; body: string; created_at?: string; expires_at?: string };
+        Update: { author_id?: string; body?: string; created_at?: string; expires_at?: string };
+        Relationships: [
+          {
+            foreignKeyName: "notes_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: true;
             referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
@@ -905,7 +930,11 @@ export type Database = {
         Args: Record<string, never>;
         Returns: { conversation_id: string; unread: number }[];
       };
-      can_read_message: { Args: { p_conversation_id: string; p_sender_id: string }; Returns: boolean };
+      can_read_message: { Args: { p_conversation_id: string; p_sender_id: string; p_created_at: string }; Returns: boolean };
+      follow_user: { Args: { p_target: string }; Returns: "following" | "requested" };
+      set_account_privacy: { Args: { p_private: boolean }; Returns: undefined };
+      set_note: { Args: { p_body: string }; Returns: undefined };
+      delete_chat_for_me: { Args: { p_conversation_id: string }; Returns: undefined };
       group_owner: { Args: { p_conversation_id: string }; Returns: string | null };
       create_group_conversation: { Args: { p_title: string; p_member_ids: string[] }; Returns: string };
       add_group_members: { Args: { p_conversation_id: string; p_member_ids: string[] }; Returns: undefined };

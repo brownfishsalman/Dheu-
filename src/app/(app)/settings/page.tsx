@@ -5,13 +5,14 @@ import { requireProfile } from "@/lib/data/session";
 import { getBlockedProfiles } from "@/lib/data/profiles";
 import { getSiteUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
-import { MEMBER_INVITE_LIMIT } from "@/lib/constants";
+import { MEMBER_INVITE_LIMIT, POST_LIFETIME_LABEL } from "@/lib/constants";
 import { ShareWithFriends } from "@/components/settings/ShareWithFriends";
 import { BlockedList } from "@/components/settings/BlockedList";
 import { PushSettings } from "@/components/push/PushSettings";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EditProfileForm } from "@/components/settings/EditProfileForm";
 import { ThemePicker, ChangePasswordForm } from "@/components/settings/AccountSettings";
+import { PrivacySettings } from "@/components/settings/AccountPrivacy";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -32,6 +33,12 @@ export default async function SettingsPage() {
         <section className="card p-5">
           <h2 className="mb-4 font-display text-lg font-semibold">Profile</h2>
           <EditProfileForm profile={profile} />
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-1 font-display text-lg font-semibold">Account privacy</h2>
+          <p className="mb-3 text-sm text-ink-muted">Who can see your posts, stories and followers.</p>
+          <PrivacySettings isPrivate={profile.is_private} />
         </section>
 
         <section className="card p-5">
@@ -78,7 +85,7 @@ export default async function SettingsPage() {
         </form>
 
         <p className="text-center text-xs text-ink-faint">
-          Dheu · posts expire after 30 days · stories after 24 hours
+          Dheu · posts expire after {POST_LIFETIME_LABEL} · stories after 24 hours
         </p>
       </div>
     </div>

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Send, Loader2, ImagePlus, X, Reply, Clock, Mic, Square, Trash2 } from "lucide-react";
+import { Send, Loader2, ImagePlus, X, Reply, Clock, Mic, Square, Trash2, MoreHorizontal, Copy, Undo2 } from "lucide-react";
+import { Sheet } from "@/components/ui/Sheet";
 import { createClient } from "@/lib/supabase/client";
 import { ensureRealtimeAuth } from "@/lib/supabase/realtime";
 import { publicUrl } from "@/lib/storage";
@@ -66,6 +67,12 @@ function toReplyPreview(m: ChatMessage): ReplyPreview {
 }
 const REPLY_SELECT = "id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at";
 
+// Drop an unsent message, and its quote from any reply to it.
+function withoutMessage(list: ChatMessage[], id: string): ChatMessage[] {
+  if (!list.some((m) => m.id === id || m.reply?.id === id)) return list;
+  return list.filter((m) => m.id !== id).map((m) => (m.reply?.id === id ? { ...m, reply: null } : m));
+}
+
 // "You added Rafi Karim, Tania Sultana" — rendered from the event so the
 // viewer's own name becomes "You"; the stored body is the fallback.
 function systemText(m: ChatMessage, nameOf: (id: string) => string): string {
@@ -107,6 +114,8 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [actionFor, setActionFor] = useState<ChatMessage | null>(null); // long-press / ⋯ menu
+  const closeActions = useCallback(() => setActionFor(null), []);
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +184,12 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
         if (row.sender_id !== meId && document.visibilityState === "visible") markRead();
       },
     );
+    // Unsent messages. Realtime can't filter DELETE events (they carry only the
+    // id), so every open chat hears every unsend and drops the ones it holds.
+    channel.on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (payload) => {
+      const id = (payload.old as { id?: string }).id;
+      if (id) setMessages((m) => withoutMessage(m, id));
+    });
     ensureRealtimeAuth(supabase).then(() => {
       if (cancelled) return;
       channel.subscribe((status, err) => {
@@ -217,6 +232,26 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
     setReplyTo(m);
     inputRef.current?.focus();
   }, []);
+
+  // Unsend: delete my message for everyone, then its photo / voice file.
+  async function unsend(m: ChatMessage) {
+    setActionFor(null);
+    if (!confirm("Unsend this message? It will be removed for everyone.")) return;
+    const supabase = createClient();
+    const { data, error: err } = await supabase.from("messages").delete().eq("id", m.id).select("id");
+    if (err || !data?.length) return setError("Couldn't unsend that message.");
+    setMessages((list) => withoutMessage(list, m.id));
+    if (replyTo?.id === m.id) setReplyTo(null);
+    const files = [m.image_path, m.audio_path].filter((p): p is string => Boolean(p));
+    if (files.length) await supabase.storage.from("chat").remove(files);
+  }
+
+  async function copyText(m: ChatMessage) {
+    setActionFor(null);
+    try {
+      await navigator.clipboard.writeText(m.body);
+    } catch {}
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -264,7 +299,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
         audio_duration_ms,
         reply_to_id: replyTo?.id ?? null,
       })
-      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, created_at")
+      .select("id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, note_text, created_at")
       .single();
     setSending(false);
     if (err || !data) {
@@ -338,6 +373,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
             sender={isGroup && !mine ? { name: nameOf(m.sender_id), avatar: people.get(m.sender_id) ?? null, showName: !grouped, showAvatar: endOfRun } : null}
             nameOf={nameOf}
             onReply={canSend ? () => startReply(m) : undefined}
+            onActions={canSend || m.body || mine ? () => setActionFor(m) : undefined}
             onOpenImage={setLightbox}
             scrollToReply={(id) => byId.has(id) && document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
           />
@@ -492,6 +528,35 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
         </form>
       )}
 
+      {actionFor && (
+        <Sheet title={actionFor.sender_id === meId ? "Your message" : "Message"} onClose={closeActions}>
+          <div className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+            {canSend && (
+              <button
+                type="button"
+                onClick={() => {
+                  startReply(actionFor);
+                  setActionFor(null);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2"
+              >
+                <Reply className="size-4" /> Reply
+              </button>
+            )}
+            {actionFor.body && (
+              <button type="button" onClick={() => copyText(actionFor)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2">
+                <Copy className="size-4" /> Copy text
+              </button>
+            )}
+            {actionFor.sender_id === meId && actionFor.kind === "text" && (
+              <button type="button" onClick={() => unsend(actionFor)} className="flex w-full items-center gap-3 px-4 py-3 text-left text-danger hover:bg-surface-2">
+                <Undo2 className="size-4" /> Unsend
+              </button>
+            )}
+          </div>
+        </Sheet>
+      )}
+
       {lightbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => setLightbox(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -515,6 +580,7 @@ function Bubble({
   sender,
   nameOf,
   onReply,
+  onActions,
   onOpenImage,
   scrollToReply,
 }: {
@@ -524,24 +590,50 @@ function Bubble({
   sender: SenderInfo | null; // set for other people's messages in a group
   nameOf: (id: string) => string;
   onReply?: () => void;
+  onActions?: () => void; // long-press (touch), right-click or ⋯: reply / copy / unsend
   onOpenImage: (src: string) => void;
   scrollToReply: (id: string) => void;
 }) {
   const [dx, setDx] = useState(0);
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
   const fired = useRef(false);
+  const press = useRef<ReturnType<typeof setTimeout> | null>(null);
   const THRESHOLD = 56;
 
+  function cancelPress() {
+    if (press.current) clearTimeout(press.current);
+    press.current = null;
+  }
+  useEffect(() => {
+    const timer = press;
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
   function onPointerDown(e: React.PointerEvent) {
-    if (e.pointerType === "mouse" || !onReply) return;
+    if (e.pointerType === "mouse" || (!onReply && !onActions)) return;
     start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
     fired.current = false;
+    cancelPress();
+    // Holding still for half a second opens the message actions.
+    if (onActions) {
+      press.current = setTimeout(() => {
+        press.current = null;
+        start.current = null;
+        setDx(0);
+        if (navigator.vibrate) navigator.vibrate(10);
+        onActions();
+      }, 500);
+    }
   }
   function onPointerMove(e: React.PointerEvent) {
     const s = start.current;
     if (!s || e.pointerId !== s.id) return;
     const ddx = e.clientX - s.x;
     const ddy = e.clientY - s.y;
+    if (Math.abs(ddx) > 8 || Math.abs(ddy) > 8) cancelPress();
+    if (!onReply) return;
     if (Math.abs(ddy) > Math.abs(ddx) + 8) return; // vertical scroll wins
     // Swipe toward the centre: right for their bubbles, left for mine
     const dir = mine ? -1 : 1;
@@ -553,6 +645,7 @@ function Bubble({
     }
   }
   function onPointerEnd() {
+    cancelPress();
     if (fired.current && onReply) onReply();
     start.current = null;
     setDx(0);
@@ -568,27 +661,18 @@ function Bubble({
   return (
     <div
       id={`msg-${m.id}`}
-      className={`group relative flex touch-pan-y select-none ${mine ? "justify-end" : "justify-start"} ${grouped ? "mt-0.5" : "mt-2"}`}
+      className={`group relative flex touch-pan-y select-none [-webkit-touch-callout:none] ${mine ? "justify-end" : "justify-start"} ${grouped ? "mt-0.5" : "mt-2"}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
+      onContextMenu={(e) => {
+        if (!onActions) return;
+        e.preventDefault();
+        onActions();
+      }}
       style={{ transform: dx ? `translateX(${dx}px)` : undefined, transition: dx ? "none" : "transform 150ms ease-out" }}
     >
-      {/* reply hint revealed by the swipe / on hover */}
-      {onReply && (
-        <button
-          type="button"
-          onClick={onReply}
-          aria-label="Reply"
-          className={`absolute top-1/2 -translate-y-1/2 rounded-full p-1.5 text-ink-faint transition hover:bg-surface-2 hover:text-ink ${
-            mine ? "right-full mr-1" : "left-full ml-1"
-          } ${Math.abs(dx) >= THRESHOLD ? "text-brand opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-        >
-          <Reply className="size-4" />
-        </button>
-      )}
-
       {/* Group chats: the sender's avatar beside the last bubble of their run (a spacer otherwise) */}
       {sender && (
         <span className="mr-2 w-7 shrink-0 self-end">
@@ -598,8 +682,45 @@ function Bubble({
         </span>
       )}
 
-      <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+      <div className={`relative max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+        {/* Beside the bubble: reply (also revealed by the swipe) and ⋯, on hover */}
+        {(onReply || onActions) && (
+          <span
+            className={`absolute top-1/2 flex -translate-y-1/2 items-center ${mine ? "right-full mr-1 flex-row-reverse" : "left-full ml-1"}`}
+          >
+            {onReply && (
+              <button
+                type="button"
+                onClick={onReply}
+                aria-label="Reply"
+                className={`rounded-full p-1.5 text-ink-faint transition hover:bg-surface-2 hover:text-ink ${
+                  Math.abs(dx) >= THRESHOLD ? "text-brand opacity-100" : "opacity-0 group-hover:opacity-100"
+                }`}
+              >
+                <Reply className="size-4" />
+              </button>
+            )}
+            {onActions && (
+              <button
+                type="button"
+                onClick={onActions}
+                aria-label="More actions"
+                className="hidden rounded-full p-1.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:bg-surface-2 hover:text-ink md:block"
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            )}
+          </span>
+        )}
         {sender?.showName && <span className="mb-0.5 ml-1 text-xs font-semibold text-ink-muted">{sender.name}</span>}
+        {m.note_text && (
+          <div className={`mb-1 flex flex-col gap-1 text-xs text-ink-faint ${mine ? "items-end" : "items-start"}`}>
+            <span>{mine ? "You replied to their note" : "Replied to your note"}</span>
+            <span className="max-w-full break-words rounded-2xl border border-line bg-surface px-3 py-1.5 text-ink-muted">
+              {m.note_text}
+            </span>
+          </div>
+        )}
         {m.story_id && (
           <div className={`mb-1 flex items-end gap-2 text-xs text-ink-faint ${mine ? "flex-row-reverse" : ""}`}>
             {storySrc ? (

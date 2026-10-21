@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, X, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { processPostImage, ACCEPT_ATTR, newImagePath, thumbPathFor, type ProcessedPostImage } from "@/lib/images";
+import { POST_LIFETIME_LABEL } from "@/lib/constants";
 
 const MAX_IMAGES = 10;
 
@@ -238,7 +239,7 @@ export function NewPostForm({ userId }: { userId: string }) {
         {posting && <Loader2 className="size-4 animate-spin" />}
         {posting ? progress || "Posting…" : "Share"}
       </button>
-      <p className="text-center text-xs text-ink-faint">Posts disappear after 30 days.</p>
+      <p className="text-center text-xs text-ink-faint">Posts disappear after {POST_LIFETIME_LABEL}.</p>
     </form>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { POST_LIFETIME_LABEL } from "@/lib/constants";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -91,7 +92,7 @@ export default async function AdminOverviewPage() {
           ))}
         </dl>
         <p className="mt-3 text-xs text-ink-faint">
-          Expired posts (30 days) and stories (24 h) are removed by the daily cleanup job, which frees their storage.
+          Expired posts ({POST_LIFETIME_LABEL}) and stories (24 h) are removed by the daily cleanup job, which frees their storage.
         </p>
       </section>
     </div>

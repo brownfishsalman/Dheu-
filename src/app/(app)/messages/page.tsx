@@ -7,13 +7,16 @@ import { WaveMark } from "@/components/brand/Logo";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Avatar } from "@/components/ui/Avatar";
 import { GroupAvatar } from "@/components/chat/GroupAvatar";
+import { NotesTray } from "@/components/chat/NotesTray";
+import { ConversationMenu } from "@/components/chat/ConversationMenu";
+import { getNotes } from "@/lib/data/notes";
 import { timeAgo } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Messages" };
 
 export default async function MessagesPage() {
   const me = await requireProfile();
-  const [conversations, ann] = await Promise.all([getConversations(me.id), getAnnouncementSummary()]);
+  const [conversations, ann, notes] = await Promise.all([getConversations(me.id), getAnnouncementSummary(), getNotes()]);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -25,6 +28,8 @@ export default async function MessagesPage() {
           </Link>
         }
       />
+
+      <NotesTray me={{ id: me.id, username: me.username, full_name: me.full_name, avatar_path: me.avatar_path }} notes={notes} />
 
       {/* Pinned announcements thread */}
       <Link href="/messages/announcements" className="flex items-center gap-3 border-b border-line bg-brand-soft/40 px-4 py-3 hover:bg-brand-soft/70">
@@ -71,13 +76,13 @@ export default async function MessagesPage() {
             const preview = c.last
               ? c.last.kind === "system"
                 ? c.last.body // "Salman added Rafi Karim"
-                : `${who}${c.last.story_id ? "Replied to a story: " : ""}${c.last.image_path ? "📷 Photo " : ""}${c.last.audio_path ? "🎤 Voice message " : ""}${c.last.body}`
+                : `${who}${c.last.story_id ? "Replied to a story: " : ""}${c.last.note_text ? "Replied to a note: " : ""}${c.last.image_path ? "📷 Photo " : ""}${c.last.audio_path ? "🎤 Voice message " : ""}${c.last.body}`
               : c.isGroup
                 ? `${c.memberCount} members · No messages yet`
                 : "No messages yet";
             return (
-              <li key={c.id}>
-                <Link href={`/messages/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2/60">
+              <li key={c.id} className="flex items-center pr-2 hover:bg-surface-2/60">
+                <Link href={`/messages/${c.id}`} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4">
                   {c.isGroup ? (
                     <GroupAvatar members={c.members} size={52} />
                   ) : (
@@ -102,6 +107,7 @@ export default async function MessagesPage() {
                     </span>
                   )}
                 </Link>
+                <ConversationMenu conversationId={c.id} title={c.title} isGroup={c.isGroup} />
               </li>
             );
           })}

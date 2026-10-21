@@ -12,39 +12,46 @@ type Props = {
   className?: string;
 };
 
-// All accounts are private: Follow sends a request, which the other person
-// accepts from their Activity page. Requested → tap again to cancel.
+// Follow is instant for public accounts and a request for private ones
+// (follow_user decides). Requested → tap again to cancel.
 export function FollowButton({ targetId, initialState, size = "md", className = "" }: Props) {
   const [state, setState] = useState<FollowState>(initialState);
+  const [busy, setBusy] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
   async function act() {
     const supabase = createClient();
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
+      data: { session },
+    } = await supabase.auth.getSession();
+    const me = session?.user.id;
+    if (!me) return;
 
-    const prev = state;
-    let error: { message: string } | null = null;
-
-    if (state === "none") {
-      setState("requested");
-      ({ error } = await supabase.from("follow_requests").insert({ requester_id: user.id, target_id: targetId }));
-    } else if (state === "requested") {
-      setState("none");
-      ({ error } = await supabase.from("follow_requests").delete().match({ requester_id: user.id, target_id: targetId }));
-    } else {
-      if (!confirm("Unfollow? You'll need to send a new request to follow them again.")) return;
-      setState("none");
-      ({ error } = await supabase.from("follows").delete().match({ follower_id: user.id, following_id: targetId }));
-    }
-
-    if (error) {
-      setState(prev);
+    if (state === "following" && !confirm("Unfollow? If their account is private, you'll need to send a new request to follow them again.")) {
       return;
     }
+
+    setBusy(true);
+    let next: FollowState = state;
+    let failed = false;
+    if (state === "none") {
+      const { data, error } = await supabase.rpc("follow_user", { p_target: targetId });
+      failed = Boolean(error) || !data;
+      if (data) next = data;
+    } else if (state === "requested") {
+      const { error } = await supabase.from("follow_requests").delete().match({ requester_id: me, target_id: targetId });
+      failed = Boolean(error);
+      next = "none";
+    } else {
+      const { error } = await supabase.from("follows").delete().match({ follower_id: me, following_id: targetId });
+      failed = Boolean(error);
+      next = "none";
+    }
+    setBusy(false);
+
+    if (failed) return;
+    setState(next);
     startTransition(() => router.refresh());
   }
 
@@ -53,7 +60,7 @@ export function FollowButton({ targetId, initialState, size = "md", className = 
   const label = state === "none" ? "Follow" : state === "requested" ? "Requested" : "Following";
 
   return (
-    <button type="button" onClick={act} disabled={pending} className={`${look} ${sizing} ${className}`}>
+    <button type="button" onClick={act} disabled={busy || pending} className={`${look} ${sizing} ${className}`}>
       {label}
     </button>
   );

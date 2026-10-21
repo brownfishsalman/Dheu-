@@ -100,6 +100,10 @@ export async function GET(request: Request) {
   if (gErr) report.errors.push(`empty groups: ${gErr.message}`);
   else report.emptyGroups = gone ?? 0;
 
+  // ---- notes past their 24 hours (already hidden by RLS) ----------------
+  const { error: noteErr } = await admin.from("notes").delete().lte("expires_at", now);
+  if (noteErr) report.errors.push(`notes: ${noteErr.message}`);
+
   // ---- old notifications (keep the activity page light) -----------------
   const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const { error: nErr } = await admin.from("notifications").delete().lt("created_at", cutoff);

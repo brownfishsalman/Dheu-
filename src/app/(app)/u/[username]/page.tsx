@@ -10,6 +10,7 @@ import { ProfileMenu } from "@/components/profile/ProfileMenu";
 import { PostGrid } from "@/components/post/PostGrid";
 import { HighlightsRow } from "@/components/story/HighlightsRow";
 import { getHighlights } from "@/lib/data/stories";
+import { POST_LIFETIME_LABEL } from "@/lib/constants";
 
 export async function generateMetadata(props: PageProps<"/u/[username]">): Promise<Metadata> {
   const { username } = await props.params;
@@ -32,8 +33,9 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
   ]);
   const blockedByMe = stats.blockStatus === "by_me" || stats.blockStatus === "both";
 
-  // Everyone's account is private: content only for approved followers (or yourself / admin).
-  const canSee = isMe || me.is_admin || (stats.isFollowing && !blockedByMe);
+  // Public accounts show their content to everyone; private ones only to
+  // approved followers (and yourself / the admin). A block hides it either way.
+  const canSee = isMe || me.is_admin || ((!profile.is_private || stats.isFollowing) && !blockedByMe);
 
   const followState = stats.isFollowing ? "following" : stats.requested ? "requested" : "none";
 
@@ -52,6 +54,11 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <h1 className="truncate text-xl font-semibold sm:text-2xl">{profile.username}</h1>
+              {profile.is_private && (
+                <span title="Private account" className="text-ink-muted">
+                  <Lock className="size-4" />
+                </span>
+              )}
               {profile.is_admin && (
                 <span title="Admin" className="text-brand">
                   <ShieldCheck className="size-5" />
@@ -146,7 +153,7 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
               <div className="px-4 py-16 text-center">
                 <p className="font-display text-lg font-semibold">No posts yet</p>
                 <p className="mt-1 text-sm text-ink-muted">
-                  {isMe ? "Share your first photo — posts stay up for 30 days." : "Nothing here right now."}
+                  {isMe ? `Share your first photo — posts stay up for ${POST_LIFETIME_LABEL}.` : "Nothing here right now."}
                 </p>
                 {isMe && (
                   <Link href="/new" className="btn-primary mt-5">
@@ -164,7 +171,7 @@ export default async function ProfilePage(props: PageProps<"/u/[username]">) {
           <span className="mx-auto mb-3 flex size-14 items-center justify-center rounded-full border-2 border-line text-ink-muted">
             <Lock className="size-6" />
           </span>
-          <p className="font-display text-lg font-semibold">This account is private</p>
+          <p className="font-display text-lg font-semibold">{blockedByMe ? "Blocked" : "This account is private"}</p>
           <p className="mx-auto mt-1 max-w-xs text-sm text-ink-muted">
             {blockedByMe
               ? "You've blocked this member."

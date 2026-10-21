@@ -35,6 +35,7 @@ export type ConversationSummary = {
     story_id: string | null;
     image_path: string | null;
     audio_path: string | null;
+    note_text: string | null;
     kind: MessageKind;
   } | null;
   unread: number;
@@ -46,7 +47,7 @@ export async function getConversations(meId: string): Promise<ConversationSummar
     supabase
       .from("conversations")
       .select(
-        `id, is_group, title, last_message_at, ${MEMBER_EMBED}, messages(body, sender_id, created_at, story_id, image_path, audio_path, kind, sender:profiles!messages_sender_id_fkey(full_name))`,
+        `id, is_group, title, last_message_at, ${MEMBER_EMBED}, reads:conversation_reads(cleared_at), messages(body, sender_id, created_at, story_id, image_path, audio_path, note_text, kind, sender:profiles!messages_sender_id_fkey(full_name))`,
       )
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .order("created_at", { referencedTable: "messages", ascending: false })
@@ -62,6 +63,9 @@ export async function getConversations(meId: string): Promise<ConversationSummar
     const peer = c.is_group ? null : (members.find((m) => m.id !== meId) ?? null);
     if (!c.is_group && !peer) continue; // DM partner hidden (they blocked me) or gone
     const m = c.messages[0];
+    // I deleted this chat and nothing new has arrived since. (RLS only returns
+    // messages sent after the delete, and reads holds only my own row.)
+    if (c.reads[0]?.cleared_at && !m) continue;
     out.push({
       id: c.id,
       isGroup: c.is_group,
@@ -152,13 +156,14 @@ export type ChatMessage = {
   reply_to_id: string | null;
   kind: MessageKind;
   event: SystemEvent | null;
+  note_text: string | null; // set when this message replies to a note
   created_at: string;
   story: { image_path: string; author_id: string } | null;
   reply: ReplyPreview | null;
 };
 
 export const MESSAGE_SELECT =
-  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at)";
+  "id, conversation_id, sender_id, body, story_id, image_path, image_expires_at, audio_path, audio_duration_ms, audio_expires_at, reply_to_id, kind, event, note_text, created_at, story:stories(image_path, author_id), reply:reply_to_id(id, body, sender_id, image_path, image_expires_at, audio_path, audio_expires_at)";
 
 
 export async function getMessages(conversationId: string, before?: string): Promise<ChatMessage[]> {

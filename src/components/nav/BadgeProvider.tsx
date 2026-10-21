@@ -71,6 +71,7 @@ export function BadgeProvider({
     const channel = supabase
       .channel(`badges:${userId}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, refreshSoon)
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, refreshSoon) // unsent
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "announcements" }, refreshSoon)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, refreshSoon)
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "notifications" }, refreshSoon);

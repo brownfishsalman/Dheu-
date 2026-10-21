@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 import { signup, type AuthState } from "../actions";
 import { SubmitButton } from "@/components/ui/SubmitButton";
+import { AccountTypePicker } from "@/components/settings/AccountPrivacy";
 
 export function SignupForm({ inviteCode }: { inviteCode?: string }) {
   const [state, action] = useActionState<AuthState, FormData>(signup, {});
@@ -101,6 +102,15 @@ export function SignupForm({ inviteCode }: { inviteCode?: string }) {
         />
         <p className="mt-1 text-xs text-ink-faint">At least 8 characters.</p>
       </div>
+
+      <fieldset>
+        <legend className="mb-1.5 block text-sm font-medium">Account type</legend>
+        <AccountTypePicker
+          required
+          defaultValue={f.accountType === "public" || f.accountType === "private" ? f.accountType : undefined}
+        />
+        <p className="mt-1 text-xs text-ink-faint">You can change this later in Settings.</p>
+      </fieldset>
 
       {state.error && (
         <p role="alert" className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">

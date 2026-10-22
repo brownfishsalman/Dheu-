@@ -1,8 +1,10 @@
 import "server-only";
 import webpush from "web-push";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendFcm } from "@/lib/fcm";
 
-export type PushPayload = { title: string; body: string; url: string; tag?: string };
+// icon: the person behind it (their avatar URL); the Android app shows it, browsers use the Dheu icon.
+export type PushPayload = { title: string; body: string; url: string; tag?: string; icon?: string };
 
 let configured = false;
 function configure() {
@@ -19,10 +21,29 @@ function configure() {
   return true;
 }
 
-// Send a push to every device the given members have enabled. Dead
-// subscriptions (unsubscribed / expired) are removed as we go.
+// Send a push to every device the given members have enabled: browsers and
+// installed PWAs (Web Push) and the Android app (Firebase). Dead
+// subscriptions and tokens (unsubscribed / uninstalled) are removed as we go.
 export async function sendPush(userIds: string[], payload: PushPayload): Promise<{ sent: number; removed: number }> {
-  if (userIds.length === 0 || !configure()) return { sent: 0, removed: 0 };
+  if (userIds.length === 0) return { sent: 0, removed: 0 };
+  const [web, app] = await Promise.all([sendWebPush(userIds, payload), sendAppPush(userIds, payload)]);
+  return { sent: web.sent + app.sent, removed: web.removed + app.removed };
+}
+
+async function sendAppPush(userIds: string[], payload: PushPayload): Promise<{ sent: number; removed: number }> {
+  const admin = createAdminClient();
+  const { data: devices } = await admin.from("push_devices").select("token").in("user_id", userIds);
+  if (!devices || devices.length === 0) return { sent: 0, removed: 0 };
+  const { sent, dead } = await sendFcm(
+    devices.map((d) => d.token),
+    payload,
+  );
+  if (dead.length) await admin.from("push_devices").delete().in("token", dead);
+  return { sent, removed: dead.length };
+}
+
+async function sendWebPush(userIds: string[], payload: PushPayload): Promise<{ sent: number; removed: number }> {
+  if (!configure()) return { sent: 0, removed: 0 };
   const admin = createAdminClient();
   const { data: subs } = await admin
     .from("push_subscriptions")

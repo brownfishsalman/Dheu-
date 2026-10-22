@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Heart, MessageCircle, MoreHorizontal, Link2, Trash2, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/Avatar";
+import { MentionText } from "@/components/ui/Mentions";
 import { Carousel } from "@/components/post/Carousel";
 import { timeAgo, expiresIn } from "@/lib/time";
 import { postImageFiles } from "@/lib/storage";
@@ -166,7 +167,7 @@ export function PostCard({ post, viewer, detail = false, priority, onDeleted, de
             <Link href={`/u/${post.author.username}`} className="mr-1.5 font-semibold">
               {post.author.username}
             </Link>
-            {shownCaption}
+            <MentionText text={shownCaption} />
             {captionLong && !expanded && (
               <button type="button" onClick={() => setExpanded(true)} className="ml-1 text-ink-muted">
                 more

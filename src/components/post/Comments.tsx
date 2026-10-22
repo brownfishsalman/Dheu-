@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Send, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/Avatar";
+import { MentionText, MentionMenu, useMentions } from "@/components/ui/Mentions";
 import { timeAgo } from "@/lib/time";
 import type { CommentItem, PostAuthor } from "@/lib/data/posts";
 import type { Viewer } from "@/components/post/PostCard";
@@ -23,6 +24,8 @@ export function Comments({ postId, postAuthorId, initialComments, viewer }: Prop
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const mentions = useMentions({ value: body, onChange: setBody, inputRef });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -73,7 +76,7 @@ export function Comments({ postId, postAuthorId, initialComments, viewer }: Prop
                   <Link href={`/u/${c.author.username}`} className="mr-1.5 font-semibold">
                     {c.author.username}
                   </Link>
-                  {c.body}
+                  <MentionText text={c.body} />
                 </p>
                 <p className="mt-0.5 text-xs text-ink-faint">{timeAgo(c.created_at)}</p>
               </div>
@@ -92,11 +95,19 @@ export function Comments({ postId, postAuthorId, initialComments, viewer }: Prop
         })}
       </ul>
 
-      <form onSubmit={submit} className="flex items-center gap-2 border-t border-line px-3 py-2">
+      <form onSubmit={submit} className="relative flex items-center gap-2 border-t border-line px-3 py-2">
+        <MentionMenu m={mentions} />
         <Avatar path={viewer.avatar_path} name={viewer.full_name} size={30} />
         <input
+          ref={inputRef}
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => {
+            setBody(e.target.value);
+            mentions.sync();
+          }}
+          onSelect={mentions.sync}
+          onKeyDown={mentions.onKeyDown}
+          onBlur={mentions.close}
           maxLength={1000}
           placeholder="Add a comment…"
           className="min-w-0 flex-1 bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-ink-faint"

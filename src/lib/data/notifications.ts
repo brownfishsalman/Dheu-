@@ -11,11 +11,15 @@ export type NotificationItem = {
   created_at: string;
   post_id: string | null;
   story_id: string | null;
+  conversation_id: string | null; // a mention in a group chat
   actor: NotificationActor;
   // Thumbnail for the right-hand side (null if the post/story is gone)
   thumb: string | null;
   thumbBucket: "posts" | "stories";
   commentBody: string | null;
+  // Mentions in a group chat: the message and the group's name
+  messageBody: string | null;
+  groupTitle: string | null;
 };
 
 export async function getNotifications(userId: string, limit = 100): Promise<NotificationItem[]> {
@@ -23,7 +27,7 @@ export async function getNotifications(userId: string, limit = 100): Promise<Not
   const { data } = await supabase
     .from("notifications")
     .select(
-      "id, type, read_at, created_at, post_id, story_id, actor:profiles!notifications_actor_id_fkey(id, username, full_name, avatar_path), post:posts(images:post_images(path, thumb_path, position)), comment:comments(body), story:stories(image_path)",
+      "id, type, read_at, created_at, post_id, story_id, conversation_id, actor:profiles!notifications_actor_id_fkey(id, username, full_name, avatar_path), post:posts(images:post_images(path, thumb_path, position)), comment:comments(body), story:stories(image_path), message:messages(body), conversation:conversations(title)",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
@@ -41,10 +45,13 @@ export async function getNotifications(userId: string, limit = 100): Promise<Not
       created_at: n.created_at,
       post_id: n.post_id,
       story_id: n.story_id,
+      conversation_id: n.conversation_id,
       actor: n.actor,
       thumb: n.type === "story_reaction" ? (n.story?.image_path ?? null) : cover,
       thumbBucket: n.type === "story_reaction" ? "stories" : "posts",
       commentBody: n.comment?.body ?? null,
+      messageBody: n.message?.body ?? null,
+      groupTitle: n.conversation?.title ?? null,
     });
   }
   return out;

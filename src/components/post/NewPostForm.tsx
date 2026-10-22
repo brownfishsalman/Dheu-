@@ -6,6 +6,7 @@ import { ImagePlus, X, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { processPostImage, ACCEPT_ATTR, newImagePath, thumbPathFor, type ProcessedPostImage } from "@/lib/images";
 import { POST_LIFETIME_LABEL } from "@/lib/constants";
+import { MentionMenu, useMentions } from "@/components/ui/Mentions";
 
 const MAX_IMAGES = 10;
 
@@ -16,6 +17,8 @@ export function NewPostForm({ userId }: { userId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<Picked[]>([]);
   const [caption, setCaption] = useState("");
+  const captionRef = useRef<HTMLTextAreaElement>(null);
+  const mentions = useMentions({ value: caption, onChange: setCaption, inputRef: captionRef });
   const [processing, setProcessing] = useState(0);
   const [posting, setPosting] = useState(false);
   const [progress, setProgress] = useState("");
@@ -214,18 +217,26 @@ export function NewPostForm({ userId }: { userId: string }) {
         onChange={onPick}
       />
 
-      <div>
+      <div className="relative">
         <label htmlFor="caption" className="sr-only">
           Caption
         </label>
         <textarea
           id="caption"
+          ref={captionRef}
           className="input min-h-24 resize-y"
-          placeholder="Write a caption…"
+          placeholder="Write a caption… @mention people"
           value={caption}
           maxLength={2200}
-          onChange={(e) => setCaption(e.target.value)}
+          onChange={(e) => {
+            setCaption(e.target.value);
+            mentions.sync();
+          }}
+          onSelect={mentions.sync}
+          onKeyDown={mentions.onKeyDown}
+          onBlur={mentions.close}
         />
+        <MentionMenu m={mentions} below />
         <p className="mt-1 text-right text-xs text-ink-faint">{caption.length}/2200</p>
       </div>
 

@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Heart, MessageCircle, UserPlus, Smile, UserCheck, Check, X, Loader2 } from "lucide-react";
+import { Heart, MessageCircle, UserPlus, Smile, UserCheck, Check, X, Loader2, AtSign, MessagesSquare } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { MentionText } from "@/components/ui/Mentions";
 import { FollowButton } from "@/components/profile/FollowButton";
 import { publicUrl } from "@/lib/storage";
 import { timeAgo } from "@/lib/time";
@@ -39,7 +40,7 @@ export function ActivityList({ items, states, meId }: Props) {
         <Heart className="mx-auto mb-3 size-10 text-ink-faint" strokeWidth={1.5} />
         <p className="font-display text-lg font-semibold">Nothing yet</p>
         <p className="mt-1 text-sm text-ink-muted">
-          Follow requests, likes, comments and story reactions will show up here.
+          Follow requests, likes, comments, mentions and story reactions will show up here.
         </p>
       </div>
     );
@@ -103,8 +104,16 @@ function RequestButtons({ requesterId }: { requesterId: string }) {
 }
 
 function Row({ n, state, meId }: { n: NotificationItem; state: FollowState; meId: string }) {
-  // Where the thumbnail leads: my post, or my own story (reactions are on my stories).
-  const href = n.type === "story_reaction" ? `/stories/${meId}` : n.post_id ? `/p/${n.post_id}` : "#";
+  // Where the thumbnail leads: the post, my own story (reactions are on my stories), or the group chat.
+  const href =
+    n.type === "story_reaction"
+      ? `/stories/${meId}`
+      : n.conversation_id
+        ? `/messages/${n.conversation_id}`
+        : n.post_id
+          ? `/p/${n.post_id}`
+          : "#";
+  const chat = n.type === "mention" && n.conversation_id !== null;
 
   const text =
     n.type === "like" ? (
@@ -119,6 +128,23 @@ function Row({ n, state, meId }: { n: NotificationItem; state: FollowState; meId
       <>
         commented: <span className="text-ink-muted">{n.commentBody ?? "…"}</span>
       </>
+    ) : n.type === "mention" ? (
+      chat ? (
+        <>
+          mentioned you in {n.groupTitle ? <span className="font-semibold">{n.groupTitle}</span> : "a group"}
+          {n.messageBody && (
+            <>
+              : <span className="text-ink-muted"><MentionText text={n.messageBody} className="" /></span>
+            </>
+          )}
+        </>
+      ) : n.commentBody ? (
+        <>
+          mentioned you in a comment: <span className="text-ink-muted"><MentionText text={n.commentBody} className="" /></span>
+        </>
+      ) : (
+        <>mentioned you in a post.</>
+      )
     ) : (
       <>reacted to your story.</>
     );
@@ -132,11 +158,13 @@ function Row({ n, state, meId }: { n: NotificationItem; state: FollowState; meId
           ? UserCheck
           : n.type === "comment"
             ? MessageCircle
-            : Smile;
+            : n.type === "mention"
+              ? AtSign
+              : Smile;
 
   const thumbSrc = n.thumb ? publicUrl(n.thumbBucket, n.thumb) : null;
   const social = n.type === "follow" || n.type === "follow_request" || n.type === "follow_accepted";
-  const gone = !social && !n.thumb;
+  const gone = !social && !chat && !n.thumb;
 
   return (
     <li className={`flex items-center gap-3 px-4 py-2.5 ${n.read_at === null ? "bg-brand-soft/40" : ""}`}>
@@ -159,6 +187,10 @@ function Row({ n, state, meId }: { n: NotificationItem; state: FollowState; meId
         <RequestButtons requesterId={n.actor.id} />
       ) : social ? (
         <FollowButton targetId={n.actor.id} initialState={state} size="sm" />
+      ) : chat ? (
+        <Link href={href} className="flex size-12 shrink-0 items-center justify-center rounded-md bg-surface-2 text-ink-muted" aria-label="Open chat">
+          <MessagesSquare className="size-5" />
+        </Link>
       ) : gone ? (
         <span className="w-12 text-center text-[10px] leading-tight text-ink-faint">no longer available</span>
       ) : (

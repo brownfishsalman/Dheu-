@@ -64,6 +64,8 @@ export default async function ConversationPage(props: PageProps<"/messages/[conv
         peer={conv.peer}
         group={conv.isGroup ? { title: conv.title, memberCount: conv.members.length } : null}
         members={[...conv.members, ...former]}
+        mentionable={conv.isGroup ? others : []}
+        meUsername={me.username}
         initialMessages={messages}
         blocked={conv.blocked}
       />

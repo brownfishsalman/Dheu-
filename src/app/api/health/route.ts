@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fcmAccount } from "@/lib/fcm";
 
 // Short fingerprint of a secret so two copies can be compared without revealing either.
 const fp = (v: string | undefined) => (v ? createHash("sha256").update(v.trim()).digest("hex").slice(0, 8) : null);
@@ -29,6 +30,8 @@ export async function GET() {
       vapidPrivateKeyLen: process.env.VAPID_PRIVATE_KEY?.length ?? 0,
       vapidPublicKeyFp: fp(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY),
       webhookSecret: fp(process.env.PUSH_WEBHOOK_SECRET),
+      // the Android app's Firebase project, once FCM_SERVICE_ACCOUNT is set (null until then)
+      fcmProject: fcmAccount()?.project_id ?? null,
     },
   });
 }

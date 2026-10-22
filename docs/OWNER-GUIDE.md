@@ -49,7 +49,8 @@ Useful commands:
    - `supabase/migrations/0017_notes.sql`
    - `supabase/migrations/0018_posts_three_months.sql`
    - `supabase/migrations/0019_delete_chat_unsend.sql`
-   (0016–0019 must run before deploying the code that uses them.)
+   - `supabase/migrations/0020_mentions_app_push.sql` (@mentions, and push for the Android app)
+   (0016–0020 must run before deploying the code that uses them.)
 2. **Turn off "Confirm email"** – Supabase → Authentication → Sign In / Providers → Email → untick _Confirm email_. (Accounts are created by the app with the invite code, so no confirmation email is needed. The free tier can't send emails to arbitrary addresses anyway.)
 3. **Keys** – Supabase → Project Settings → API keys. Put the URL, the _publishable_ key and the _secret_ key in `.env.local` (copy `.env.example`).
 4. **First account = admin.** The very first person to sign up doesn't need an invite code and automatically becomes the admin. Do this yourself immediately after deploying.
@@ -74,6 +75,15 @@ To use a custom domain later: Vercel → Project → Settings → Domains.
    `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `PUSH_WEBHOOK_SECRET` (any long random string).
 3. In `0008_suggestions_push.sql`, replace `__PUSH_URL__` with `https://<your-site>/api/push` and `__PUSH_SECRET__` with the same secret, then run it in the SQL Editor.
 4. Members turn notifications on under Settings → Notifications (on iPhone only after adding Dheu to the Home Screen).
+
+### 3b. Push notifications for the Android app (one-time setup)
+
+The app uses Firebase Cloud Messaging; the website does the sending.
+
+1. In the Firebase console, create a project and add an Android app with the package name `com.salmansaadiq.dheu`. Download `google-services.json` into `android/app/` before building the app (see `android/README.md`).
+2. Project settings → Service accounts → **Generate new private key**. In Vercel → Settings → Environment Variables, add `FCM_SERVICE_ACCOUNT` with the whole contents of that JSON file, then redeploy. Treat it like the Supabase secret key.
+3. Check `https://<your-site>/api/health`: `push.fcmProject` shows your Firebase project's ID once it's set.
+4. In the app, notifications are on by default; Android 13 and newer asks once after signing in. Members can switch them off under Settings → Notifications.
 
 ---
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPush, type PushPayload } from "@/lib/push";
+import { avatarUrl } from "@/lib/storage";
 
 // Called by the database (pg_net trigger) whenever a notification, message or
 // announcement row is inserted. Authenticated with a shared secret held in
@@ -10,9 +11,11 @@ type NotificationRow = {
   id: string;
   user_id: string;
   actor_id: string;
-  type: "like" | "follow" | "comment" | "story_reaction" | "follow_request" | "follow_accepted";
+  type: "like" | "follow" | "comment" | "story_reaction" | "follow_request" | "follow_accepted" | "mention";
   post_id: string | null;
   comment_id: string | null;
+  conversation_id: string | null; // mentions in a group chat
+  message_id: string | null;
 };
 type MessageRow = {
   id: string;
@@ -27,10 +30,11 @@ type MessageRow = {
 };
 type AnnouncementRow = { id: string; body: string };
 
-async function usernameOf(id: string) {
+// Who did it: their username for the text, their photo for the app's notification.
+async function personOf(id: string): Promise<{ name: string; icon?: string }> {
   const admin = createAdminClient();
-  const { data } = await admin.from("profiles").select("username").eq("id", id).maybeSingle();
-  return data?.username ?? "Someone";
+  const { data } = await admin.from("profiles").select("username, avatar_path").eq("id", id).maybeSingle();
+  return { name: data?.username ?? "Someone", icon: avatarUrl(data?.avatar_path) ?? undefined };
 }
 
 export async function POST(request: Request) {
@@ -47,9 +51,9 @@ export async function POST(request: Request) {
 
   if (table === "notifications") {
     const n = record as NotificationRow;
-    const actor = await usernameOf(n.actor_id);
+    const { name: actor, icon } = await personOf(n.actor_id);
     recipients = [n.user_id];
-    const map: Record<NotificationRow["type"], { body: string; url: string }> = {
+    const map: Record<Exclude<NotificationRow["type"], "mention">, { body: string; url: string }> = {
       like: { body: `${actor} liked your post`, url: n.post_id ? `/p/${n.post_id}` : "/activity" },
       comment: { body: `${actor} commented on your post`, url: n.post_id ? `/p/${n.post_id}` : "/activity" },
       follow: { body: `${actor} started following you`, url: `/u/${actor}` },
@@ -57,13 +61,17 @@ export async function POST(request: Request) {
       follow_accepted: { body: `${actor} accepted your follow request`, url: `/u/${actor}` },
       story_reaction: { body: `${actor} reacted to your story`, url: `/stories/${n.user_id}` },
     };
-    const m = map[n.type];
-    if (!m) return NextResponse.json({ ok: true, skipped: "unknown type" });
-    if (n.type === "comment" && n.comment_id) {
-      const { data: c } = await admin.from("comments").select("body").eq("id", n.comment_id).maybeSingle();
-      if (c?.body) m.body = `${actor} commented: ${c.body.slice(0, 80)}`;
+    if (n.type === "mention") {
+      payload = await mentionPayload(n, actor, icon);
+    } else {
+      const m = map[n.type];
+      if (!m) return NextResponse.json({ ok: true, skipped: "unknown type" });
+      if (n.type === "comment" && n.comment_id) {
+        const { data: c } = await admin.from("comments").select("body").eq("id", n.comment_id).maybeSingle();
+        if (c?.body) m.body = `${actor} commented: ${c.body.slice(0, 80)}`;
+      }
+      payload = { title: "Dheu", body: m.body, url: m.url, tag: `notif-${n.type}-${n.actor_id}`, icon };
     }
-    payload = { title: "Dheu", body: m.body, url: m.url, tag: `notif-${n.type}-${n.actor_id}` };
   } else if (table === "messages") {
     const msg = record as MessageRow;
     const [{ data: conv }, { data: blocks }] = await Promise.all([
@@ -77,7 +85,7 @@ export async function POST(request: Request) {
     ]);
     if (!conv) return NextResponse.json({ ok: true, skipped: "no conversation" });
     const blocked = new Set((blocks ?? []).flatMap((b) => [b.blocker_id, b.blocked_id]));
-    const sender = await usernameOf(msg.sender_id);
+    const { name: sender, icon } = await personOf(msg.sender_id);
     const url = `/messages/${msg.conversation_id}`;
     const tag = `chat-${msg.conversation_id}`;
 
@@ -85,19 +93,29 @@ export async function POST(request: Request) {
       // System lines stay quiet, except that people who were just added should hear about it.
       if (msg.event?.type !== "added") return NextResponse.json({ ok: true, skipped: "system line" });
       recipients = (msg.event.targets ?? []).filter((id) => !blocked.has(id));
-      payload = { title: conv.title ?? "Group", body: `${sender} added you to the group`, url, tag };
+      payload = { title: conv.title ?? "Group", body: `${sender} added you to the group`, url, tag, icon };
     } else {
-      recipients = conv.members.map((m) => m.user_id).filter((id) => id !== msg.sender_id && !(conv.is_group && blocked.has(id)));
+      // Members this message mentions get the "mentioned you" push instead (see 0020).
+      const { data: mentioned } = conv.is_group
+        ? await admin.from("notifications").select("user_id").eq("message_id", msg.id).eq("type", "mention")
+        : { data: [] };
+      const skip = new Set((mentioned ?? []).map((m) => m.user_id));
+      recipients = conv.members
+        .map((m) => m.user_id)
+        .filter((id) => id !== msg.sender_id && !skip.has(id) && !(conv.is_group && blocked.has(id)));
       const content = msg.body ? msg.body.slice(0, 100) : msg.audio_path ? "🎤 Voice message" : "📷 Photo";
       const text = msg.note_text ? `Replied to your note: ${content}` : content;
       payload = conv.is_group
-        ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url, tag }
-        : { title: sender, body: text, url, tag };
+        ? { title: conv.title ?? "Group", body: `${sender}: ${text}`, url, tag, icon }
+        : { title: sender, body: text, url, tag, icon };
     }
   } else if (table === "announcements") {
     const a = record as AnnouncementRow;
-    const { data: subs } = await admin.from("push_subscriptions").select("user_id");
-    recipients = [...new Set((subs ?? []).map((s) => s.user_id))];
+    const [{ data: subs }, { data: devices }] = await Promise.all([
+      admin.from("push_subscriptions").select("user_id"),
+      admin.from("push_devices").select("user_id"),
+    ]);
+    recipients = [...new Set([...(subs ?? []), ...(devices ?? [])].map((s) => s.user_id))];
     payload = { title: "Dheu announcements", body: a.body.slice(0, 140), url: "/messages/announcements", tag: "announcement" };
   } else {
     return NextResponse.json({ ok: true, skipped: "unknown table" });
@@ -111,4 +129,30 @@ export async function POST(request: Request) {
     console.error("[push] send failed:", err);
     return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 });
   }
+}
+
+// "rafi mentioned you in a comment: …" / "… in a post" / in a group chat.
+async function mentionPayload(n: NotificationRow, actor: string, icon: string | undefined): Promise<PushPayload> {
+  const admin = createAdminClient();
+  if (n.conversation_id) {
+    const [{ data: conv }, { data: msg }] = await Promise.all([
+      admin.from("conversations").select("title").eq("id", n.conversation_id).maybeSingle(),
+      n.message_id ? admin.from("messages").select("body").eq("id", n.message_id).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    const text = msg?.body ? `: ${msg.body.slice(0, 100)}` : "";
+    return {
+      title: conv?.title ?? "Group",
+      body: `${actor} mentioned you${text}`,
+      url: `/messages/${n.conversation_id}`,
+      tag: `chat-${n.conversation_id}`,
+      icon,
+    };
+  }
+  const url = n.post_id ? `/p/${n.post_id}` : "/activity";
+  if (n.comment_id) {
+    const { data: c } = await admin.from("comments").select("body").eq("id", n.comment_id).maybeSingle();
+    const text = c?.body ? `: ${c.body.slice(0, 80)}` : "";
+    return { title: "Dheu", body: `${actor} mentioned you in a comment${text}`, url, tag: `notif-mention-${n.comment_id}`, icon };
+  }
+  return { title: "Dheu", body: `${actor} mentioned you in a post`, url, tag: `notif-mention-${n.post_id}`, icon };
 }

@@ -11,6 +11,7 @@ import { processImage, POST_MAX, ACCEPT_ATTR, newImagePath, type ProcessedImage 
 import { newAudioPath, baseMime, formatDuration } from "@/lib/audio";
 import { Avatar } from "@/components/ui/Avatar";
 import { GroupAvatar } from "@/components/chat/GroupAvatar";
+import { MentionText, MentionMenu, useMentions } from "@/components/ui/Mentions";
 import { VoiceNote, useVoiceRecorder } from "@/components/chat/VoiceNote";
 import { loadOlderMessages } from "@/app/(app)/messages/actions";
 import type { ChatMessage, ChatPeer, ReplyPreview } from "@/lib/data/chat";
@@ -24,6 +25,8 @@ type Props = {
   peer: ChatPeer | null; // the other person in a DM; null for groups
   group: { title: string; memberCount: number } | null;
   members: ChatPeer[]; // everyone whose name may appear (current members + people who left)
+  mentionable: ChatPeer[]; // groups: the other current members, offered when typing @
+  meUsername: string;
   initialMessages: ChatMessage[];
   blocked: BlockStatus;
 };
@@ -96,7 +99,7 @@ function systemText(m: ChatMessage, nameOf: (id: string) => string): string {
   }
 }
 
-export function ChatThread({ conversationId, meId, peer, group, members, initialMessages, blocked }: Props) {
+export function ChatThread({ conversationId, meId, peer, group, members, mentionable, meUsername, initialMessages, blocked }: Props) {
   const isGroup = group !== null;
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   // Names and avatars by user id; grows if someone unknown (e.g. just added) posts.
@@ -121,6 +124,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const rec = useVoiceRecorder(VOICE_MAX_SECONDS);
+  const mentions = useMentions({ value: text, onChange: setText, inputRef, people: mentionable });
   const clip = rec.clip;
 
   const markRead = useCallback(async () => {
@@ -372,6 +376,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
             grouped={grouped}
             sender={isGroup && !mine ? { name: nameOf(m.sender_id), avatar: people.get(m.sender_id) ?? null, showName: !grouped, showAvatar: endOfRun } : null}
             nameOf={nameOf}
+            meUsername={meUsername}
             onReply={canSend ? () => startReply(m) : undefined}
             onActions={canSend || m.body || mine ? () => setActionFor(m) : undefined}
             onOpenImage={setLightbox}
@@ -380,7 +385,7 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
         </div>
       );
     });
-  }, [messages, meId, isGroup, people, nameOf, canSend, startReply]);
+  }, [messages, meId, meUsername, isGroup, people, nameOf, canSend, startReply]);
 
   return (
     <div className="flex h-[calc(100dvh-3.5rem-3rem-3.5rem-env(safe-area-inset-bottom))] flex-col md:h-[calc(100dvh-3.5rem)]">
@@ -480,7 +485,8 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 px-3 py-2">
+            <div className="relative flex items-center gap-2 px-3 py-2">
+              {isGroup && <MentionMenu m={mentions} />}
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
@@ -494,7 +500,13 @@ export function ChatThread({ conversationId, meId, peer, group, members, initial
               <input
                 ref={inputRef}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  if (isGroup) mentions.sync();
+                }}
+                onSelect={isGroup ? mentions.sync : undefined}
+                onKeyDown={isGroup ? mentions.onKeyDown : undefined}
+                onBlur={mentions.close}
                 maxLength={2000}
                 placeholder={photo || clip ? "Add a caption…" : "Message…"}
                 autoComplete="off"
@@ -579,6 +591,7 @@ function Bubble({
   grouped,
   sender,
   nameOf,
+  meUsername,
   onReply,
   onActions,
   onOpenImage,
@@ -589,6 +602,7 @@ function Bubble({
   grouped: boolean;
   sender: SenderInfo | null; // set for other people's messages in a group
   nameOf: (id: string) => string;
+  meUsername: string;
   onReply?: () => void;
   onActions?: () => void; // long-press (touch), right-click or ⋯: reply / copy / unsend
   onOpenImage: (src: string) => void;
@@ -773,7 +787,16 @@ function Bubble({
               <Clock className="size-3.5" /> Voice message expired
             </p>
           )}
-          {m.body && <p className="whitespace-pre-wrap break-words px-3.5 py-2">{m.body}</p>}
+          {m.body && (
+            <p className="whitespace-pre-wrap break-words px-3.5 py-2">
+              <MentionText
+                text={m.body}
+                me={meUsername}
+                className={mine ? "font-semibold underline underline-offset-2" : "font-semibold text-brand"}
+                meClassName="rounded bg-brand/15 px-0.5 font-semibold text-brand"
+              />
+            </p>
+          )}
           {mediaExpiresAt && (
             <p className={`px-3 pb-1.5 text-[10px] ${mine ? "text-brand-ink/70" : "text-ink-faint"} ${m.body ? "-mt-1" : "pt-1"}`}>
               disappears in {daysLeft(mediaExpiresAt)}d

@@ -1,6 +1,13 @@
 // Hand-written to mirror supabase/migrations/*.sql. Keep the two in sync.
 
-export type NotificationType = "like" | "follow" | "comment" | "story_reaction" | "follow_request" | "follow_accepted";
+export type NotificationType =
+  | "like"
+  | "follow"
+  | "comment"
+  | "story_reaction"
+  | "follow_request"
+  | "follow_accepted"
+  | "mention"; // caption / comment (post_id, comment_id) or group message (conversation_id, message_id), see 0020
 export type MessageKind = "text" | "system";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -621,6 +628,8 @@ export type Database = {
           post_id: string | null;
           comment_id: string | null;
           story_id: string | null;
+          conversation_id: string | null;
+          message_id: string | null;
           read_at: string | null;
           created_at: string;
         };
@@ -632,6 +641,8 @@ export type Database = {
           post_id?: string | null;
           comment_id?: string | null;
           story_id?: string | null;
+          conversation_id?: string | null;
+          message_id?: string | null;
           read_at?: string | null;
           created_at?: string;
         };
@@ -643,6 +654,8 @@ export type Database = {
           post_id?: string | null;
           comment_id?: string | null;
           story_id?: string | null;
+          conversation_id?: string | null;
+          message_id?: string | null;
           read_at?: string | null;
           created_at?: string;
         };
@@ -694,6 +707,20 @@ export type Database = {
             columns: ["story_id"];
             isOneToOne: false;
             referencedRelation: "stories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_message_id_fkey";
+            columns: ["message_id"];
+            isOneToOne: false;
+            referencedRelation: "messages";
             referencedColumns: ["id"];
           },
         ];
@@ -827,6 +854,21 @@ export type Database = {
           },
         ];
       };
+      push_devices: {
+        // the Android app's Firebase Cloud Messaging tokens (0020); written through register_push_device()
+        Row: { token: string; user_id: string; platform: "android"; created_at: string; updated_at: string };
+        Insert: { token: string; user_id: string; platform?: "android"; created_at?: string; updated_at?: string };
+        Update: { token?: string; user_id?: string; platform?: "android"; created_at?: string; updated_at?: string };
+        Relationships: [
+          {
+            foreignKeyName: "push_devices_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       conversation_reads: {
         // cleared_at: when this member deleted the chat (see 0019)
         Row: { conversation_id: string; user_id: string; last_read_at: string; cleared_at: string | null };
@@ -942,6 +984,7 @@ export type Database = {
       remove_group_member: { Args: { p_conversation_id: string; p_user_id: string }; Returns: undefined };
       rename_group: { Args: { p_conversation_id: string; p_title: string }; Returns: undefined };
       delete_empty_groups: { Args: Record<string, never>; Returns: number };
+      register_push_device: { Args: { p_token: string }; Returns: undefined };
       // always exactly one row: call with .single()
       badge_counts: {
         Args: Record<string, never>;

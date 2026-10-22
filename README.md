@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://dheu-beige.vercel.app"><img alt="Live" src="https://img.shields.io/badge/live-dheu--beige.vercel.app-1589a5?style=flat-square" /></a>
-  <a href="https://github.com/brownfishsalman/Dheu-/releases/latest"><img alt="Android APK" src="https://img.shields.io/badge/Android-APK-3ddc84?style=flat-square&logo=android&logoColor=white" /></a>
+  <a href="https://github.com/brownfishsalman/Dheu-Social-Media/releases/latest"><img alt="Android APK" src="https://img.shields.io/badge/Android-APK-3ddc84?style=flat-square&logo=android&logoColor=white" /></a>
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs" />
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232a?style=flat-square&logo=react" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white" />
@@ -69,7 +69,7 @@
 
 Version 0.2.0 does everything a member can do on the website: the feed with suggestions, posts, profiles with highlights, stories, Activity, Messages with notes, voice messages and group chats you can start and manage, @mentions, and push notifications. Only the admin tools stay on the website.
 
-To try it, download the APK from the [latest release](https://github.com/brownfishsalman/Dheu-/releases/latest) on your phone and open it. Android will ask you to allow your browser to install apps; allow it for this one install. Build steps, release signing and a tour of the code are in [android/README.md](android/README.md).
+To try it, download the APK from the [latest release](https://github.com/brownfishsalman/Dheu-Social-Media/releases/latest) on your phone and open it. If you have 0.1.0, uninstall it first: 0.2.0 is signed with a new key, and you only need to log in again. Android will ask you to allow your browser to install apps; allow it for this one install. Build steps, release signing and a tour of the code are in [android/README.md](android/README.md).
 
 ## How it works
 
@@ -121,7 +121,7 @@ Inserting a like, follow request, comment or story reaction fires a PL/pgSQL tri
 
 ### Mentions are read by the database
 
-`mentioned_profiles()` finds the @usernames in a caption, comment or group message, with the same rule the website and the app use to link them. Triggers on comments, the first photo of a post, and group messages turn them into notifications, but only for people allowed to see the post, or in the group, and never across a block. A mention in a group replaces that person's ordinary message notification, so they get one, not two.
+`mentioned_profiles()` finds the @usernames in a caption, comment or group message, with the same rule the website and the app use to link them. Triggers on comments, the first photo of a post, and group messages turn them into notifications, but only for people allowed to see the post, or in the group, and never across a block. In a group, the mention replaces that person's ordinary message notification, so they get a single notification for it.
 
 ### Push: database, then site, then device
 
@@ -153,8 +153,8 @@ About 11,100 lines of TypeScript, 8,700 of Kotlin and 2,600 of SQL (25 tables, 6
 ## Running it yourself
 
 ```bash
-git clone https://github.com/brownfishsalman/Dheu-.git
-cd Dheu-
+git clone https://github.com/brownfishsalman/Dheu-Social-Media.git
+cd Dheu-Social-Media
 npm install
 cp .env.example .env.local   # fill in your Supabase URL + keys
 npm run dev

@@ -7,7 +7,7 @@
   "homepage": "https://dheu-beige.vercel.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/brownfishsalman/Dheu-.git"
+    "url": "https://github.com/brownfishsalman/Dheu-Social-Media.git"
   },
   "scripts": {
     "dev": "next dev",

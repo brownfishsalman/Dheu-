@@ -2,7 +2,7 @@
 
 The native Android app for [Dheu](../README.md), written in Kotlin with Jetpack Compose. It talks to the same Supabase project as the website and depends on the same Row Level Security, so the only credential it ever holds is the signed-in member's own session.
 
-It runs on Android 9 (API 28) and newer. Test builds are on the [Releases page](https://github.com/brownfishsalman/Dheu-/releases).
+It runs on Android 9 (API 28) and newer. Test builds are on the [Releases page](https://github.com/brownfishsalman/Dheu-Social-Media/releases).
 
 ## What's in 0.2.0
 

@@ -24,8 +24,9 @@ object Activity {
     suspend fun notifications(me: String): List<NotificationRow> =
         client.from("notifications").select(
             Columns.raw(
-                "id, type, read_at, created_at, post_id, story_id, actor:profiles!notifications_actor_id_fkey($PERSON), " +
-                    "post:posts(images:post_images(path, thumb_path, width, height, position)), comment:comments(body), story:stories(image_path)",
+                "id, type, read_at, created_at, post_id, story_id, conversation_id, actor:profiles!notifications_actor_id_fkey($PERSON), " +
+                    "post:posts(images:post_images(path, thumb_path, width, height, position)), comment:comments(body), story:stories(image_path), " +
+                    "message:messages(body), conversation:conversations(title)",
             ),
         ) {
             filter { eq("user_id", me) }

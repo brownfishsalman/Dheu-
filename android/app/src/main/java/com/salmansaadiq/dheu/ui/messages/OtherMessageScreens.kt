@@ -3,6 +3,7 @@ package com.salmansaadiq.dheu.ui.messages
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.salmansaadiq.dheu.R
@@ -57,6 +59,7 @@ import com.salmansaadiq.dheu.ui.icons.Lucide
 import com.salmansaadiq.dheu.ui.nav.ChatRoute
 import com.salmansaadiq.dheu.ui.nav.DirectMessageRoute
 import com.salmansaadiq.dheu.ui.nav.LocalNav
+import com.salmansaadiq.dheu.ui.nav.NewGroupRoute
 import com.salmansaadiq.dheu.ui.rememberLoader
 import com.salmansaadiq.dheu.ui.theme.Dheu
 import kotlinx.coroutines.delay
@@ -111,12 +114,16 @@ fun NewMessageScreen() {
             colors = fieldColors(),
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
-        Text(
-            "New groups and adding people are on the website for now.",
-            color = c.inkFaint,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().clickable { nav.replace(NewGroupRoute) }.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(c.brandSoft), contentAlignment = Alignment.Center) {
+                Icon(Lucide.Users, null, tint = c.brand, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Text("New group", color = c.brand, fontWeight = FontWeight.SemiBold)
+        }
         when {
             error != null && people == null -> ErrorState(error!!, onRetry = null)
             people == null -> Loading()

@@ -17,8 +17,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,10 +37,13 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,17 +51,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.salmansaadiq.dheu.data.FollowState
+import com.salmansaadiq.dheu.data.Person
 import com.salmansaadiq.dheu.data.Post
 import com.salmansaadiq.dheu.data.Posts
 import com.salmansaadiq.dheu.data.Profile
 import com.salmansaadiq.dheu.data.Profiles
 import com.salmansaadiq.dheu.data.Stories
 import com.salmansaadiq.dheu.data.StoryGroup
+import com.salmansaadiq.dheu.data.SuggestionPrefs
 import com.salmansaadiq.dheu.data.friendly
 import com.salmansaadiq.dheu.ui.LocalAppState
 import com.salmansaadiq.dheu.ui.auth.Wordmark
 import com.salmansaadiq.dheu.ui.components.Avatar
 import com.salmansaadiq.dheu.ui.components.CountBadge
+import com.salmansaadiq.dheu.ui.components.FollowButton
 import com.salmansaadiq.dheu.ui.components.EmptyState
 import com.salmansaadiq.dheu.ui.components.ErrorState
 import com.salmansaadiq.dheu.ui.components.Loading
@@ -72,6 +82,7 @@ import com.salmansaadiq.dheu.ui.theme.Dheu
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 class HomeViewModel(private val me: String) : ViewModel() {
     var posts by mutableStateOf<List<Post>>(emptyList())
@@ -79,6 +90,9 @@ class HomeViewModel(private val me: String) : ViewModel() {
     var stories by mutableStateOf<List<StoryGroup>>(emptyList())
         private set
     var followsAnyone by mutableStateOf(false)
+        private set
+    /** "Suggested for you": on some feed loads only (about 2 in 5, like the website), and only with 2+ people. */
+    var suggestions by mutableStateOf<List<Person>>(emptyList())
         private set
     var loading by mutableStateOf(true)
         private set
@@ -100,6 +114,7 @@ class HomeViewModel(private val me: String) : ViewModel() {
             if (silent) refreshing = true else loading = true
             try {
                 val feed = async { Posts.feedPage() }
+                val suggested = async { if (Random.nextFloat() < 0.4f) runCatching { Profiles.suggestions(me) }.getOrDefault(emptyList()) else emptyList() }
                 val following = Profiles.followingIds(me)
                 val storyFeed = Stories.feed(me, following)
                 val page = feed.await()
@@ -107,6 +122,7 @@ class HomeViewModel(private val me: String) : ViewModel() {
                 cursor = page.nextCursor
                 stories = storyFeed
                 followsAnyone = following.isNotEmpty()
+                suggestions = suggested.await().takeIf { it.size >= 2 }.orEmpty()
                 error = null
             } catch (e: CancellationException) {
                 throw e
@@ -153,6 +169,10 @@ fun HomeScreen() {
     val vm: HomeViewModel = viewModel { HomeViewModel(app.userId) }
     val c = Dheu.colors
     val list = rememberLazyListState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val suggestionsHidden by remember { SuggestionPrefs.hidden(context.applicationContext) }.collectAsStateWithLifecycle(initialValue = true)
+    val suggestions = if (suggestionsHidden) emptyList() else vm.suggestions
 
     // Load the next page when the last few posts come into view.
     val nearEnd by remember {
@@ -200,9 +220,13 @@ fun HomeScreen() {
                             }
                         }
                     }
-                    items(vm.posts, key = { it.id }) { post ->
+                    itemsIndexed(vm.posts, key = { _, post -> post.id }) { i, post ->
                         PostCard(post, onDeleted = { vm.removed(post.id) })
                         Spacer(Modifier.height(8.dp).fillMaxWidth().background(c.canvas))
+                        if (suggestions.isNotEmpty() && i == minOf(1, vm.posts.lastIndex)) {
+                            SuggestedStrip(suggestions, onDismiss = { scope.launch { SuggestionPrefs.dismiss(context.applicationContext) } })
+                            Spacer(Modifier.height(8.dp).fillMaxWidth().background(c.canvas))
+                        }
                     }
                     item(key = "footer") {
                         Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
@@ -273,5 +297,34 @@ private fun StoryBubble(label: String, seen: Boolean?, onClick: () -> Unit, avat
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/** The admin's picks, between the first posts now and then; ✕ hides it for a day. */
+@Composable
+private fun SuggestedStrip(people: List<Person>, onDismiss: () -> Unit) {
+    val nav = LocalNav.current
+    val c = Dheu.colors
+    Column(Modifier.fillMaxWidth().background(c.surface).padding(vertical = 12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Suggested for you", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text("See all", color = c.brand, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { nav.tab(SearchRoute) }.padding(8.dp))
+            IconButton(onClick = onDismiss) { Icon(Lucide.X, "Hide suggestions", tint = c.inkFaint, modifier = Modifier.size(18.dp)) }
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(people, key = { it.id }) { p ->
+                Column(
+                    Modifier.width(150.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, c.line, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Avatar(p.avatarPath, p.fullName, 64.dp, Modifier.clickable { nav.profile(p.username) })
+                    Spacer(Modifier.height(8.dp))
+                    Text(p.username, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(p.fullName, color = c.inkMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(10.dp))
+                    FollowButton(p.id, FollowState.None)
+                }
+            }
+        }
     }
 }

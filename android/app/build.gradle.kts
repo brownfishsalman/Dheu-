@@ -16,6 +16,28 @@ val local = Properties().apply {
 }
 fun setting(key: String): String = local.getProperty(key) ?: ""
 
+// Push notifications: android/app/google-services.json from the Firebase console
+// (not committed). Read here rather than through the google-services plugin, so
+// the app still builds without one; push is then simply off.
+val firebase: Map<String, String> = file("google-services.json").takeIf { it.exists() }?.let { f ->
+    @Suppress("UNCHECKED_CAST")
+    val json = groovy.json.JsonSlurper().parse(f) as Map<String, Any?>
+    val project = json["project_info"] as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST")
+    val clients = json["client"] as List<Map<String, Any?>>
+    fun info(c: Map<String, Any?>) = c["client_info"] as Map<String, Any?>
+    val client = clients.firstOrNull { (info(it)["android_client_info"] as Map<*, *>)["package_name"] == "com.salmansaadiq.dheu" }
+        ?: error("google-services.json has no Android app for com.salmansaadiq.dheu")
+    @Suppress("UNCHECKED_CAST")
+    val keys = client["api_key"] as List<Map<String, Any?>>
+    mapOf(
+        "appId" to info(client)["mobilesdk_app_id"].toString(),
+        "apiKey" to keys.first()["current_key"].toString(),
+        "projectId" to project["project_id"].toString(),
+        "senderId" to project["project_number"].toString(),
+    )
+} ?: emptyMap()
+
 android {
     namespace = "com.salmansaadiq.dheu"
     // The current AndroidX releases (navigation 2.10, lifecycle 2.11...) require compiling against API 37.
@@ -25,12 +47,16 @@ android {
         applicationId = "com.salmansaadiq.dheu"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${setting("dheu.supabaseUrl")}\"")
         buildConfigField("String", "SUPABASE_KEY", "\"${setting("dheu.supabaseKey")}\"")
         buildConfigField("String", "SITE_URL", "\"${setting("dheu.siteUrl").ifEmpty { "https://dheu-beige.vercel.app" }}\"")
+        buildConfigField("String", "FIREBASE_APP_ID", "\"${firebase["appId"].orEmpty()}\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${firebase["apiKey"].orEmpty()}\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${firebase["projectId"].orEmpty()}\"")
+        buildConfigField("String", "FIREBASE_SENDER_ID", "\"${firebase["senderId"].orEmpty()}\"")
     }
 
     buildTypes {
@@ -100,4 +126,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 }

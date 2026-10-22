@@ -1,5 +1,6 @@
 package com.salmansaadiq.dheu.ui.post
 
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,8 @@ import com.salmansaadiq.dheu.data.friendly
 import com.salmansaadiq.dheu.ui.Load
 import com.salmansaadiq.dheu.ui.LocalAppState
 import com.salmansaadiq.dheu.ui.components.Avatar
+import com.salmansaadiq.dheu.ui.components.MentionSuggestions
+import com.salmansaadiq.dheu.ui.components.MentionText
 import com.salmansaadiq.dheu.ui.components.ConfirmDialog
 import com.salmansaadiq.dheu.ui.components.DheuTopBar
 import com.salmansaadiq.dheu.ui.components.ErrorState
@@ -95,7 +98,7 @@ private fun PostWithCommentsView(post: Post, initial: List<Comment>, onDeleted: 
     val scope = rememberCoroutineScope()
     val toast = rememberToast()
     var comments by remember(post.id) { mutableStateOf(initial) }
-    var draft by remember { mutableStateOf("") }
+    var draft by remember { mutableStateOf(TextFieldValue("")) }
     var sending by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Comment?>(null) }
 
@@ -112,11 +115,7 @@ private fun PostWithCommentsView(post: Post, initial: List<Comment>, onDeleted: 
                     Avatar(author.avatarPath, author.fullName, 32.dp, Modifier.clickable { nav.profile(author.username) })
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(buildAnnotatedString {
-                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(author.username) }
-                            append("  ")
-                            append(comment.body)
-                        })
+                        MentionText(comment.body, prefix = author.username)
                         Text(timeAgo(comment.createdAt), color = c.inkFaint, style = MaterialTheme.typography.bodySmall)
                     }
                     if (canDelete) {
@@ -127,13 +126,14 @@ private fun PostWithCommentsView(post: Post, initial: List<Comment>, onDeleted: 
                 }
             }
         }
+        MentionSuggestions(draft, onPick = { draft = it })
         HorizontalDivider(color = c.line)
         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             me?.let { Avatar(it.avatarPath, it.fullName, 30.dp) }
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = draft,
-                onValueChange = { if (it.length <= 1000) draft = it },
+                onValueChange = { if (it.text.length <= 1000) draft = it },
                 placeholder = { Text("Add a comment…") },
                 shape = RoundedCornerShape(24.dp),
                 colors = fieldColors(),
@@ -141,14 +141,14 @@ private fun PostWithCommentsView(post: Post, initial: List<Comment>, onDeleted: 
                 modifier = Modifier.weight(1f),
             )
             IconButton(
-                enabled = draft.isNotBlank() && !sending,
+                enabled = draft.text.isNotBlank() && !sending,
                 onClick = {
                     val author = me?.person ?: return@IconButton
                     sending = true
                     scope.launch {
                         try {
-                            comments = comments + Posts.addComment(post.id, author, draft.trim())
-                            draft = ""
+                            comments = comments + Posts.addComment(post.id, author, draft.text.trim())
+                            draft = TextFieldValue("")
                         } catch (e: Exception) {
                             toast(e.friendly("Couldn't post your comment."))
                         } finally {
@@ -156,7 +156,7 @@ private fun PostWithCommentsView(post: Post, initial: List<Comment>, onDeleted: 
                         }
                     }
                 },
-            ) { Icon(Lucide.Send, "Post comment", tint = if (draft.isNotBlank()) c.brand else c.inkFaint) }
+            ) { Icon(Lucide.Send, "Post comment", tint = if (draft.text.isNotBlank()) c.brand else c.inkFaint) }
         }
     }
 

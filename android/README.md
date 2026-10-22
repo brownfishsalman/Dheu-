@@ -4,11 +4,23 @@ The native Android app for [Dheu](../README.md), written in Kotlin with Jetpack 
 
 It runs on Android 9 (API 28) and newer. Test builds are on the [Releases page](https://github.com/brownfishsalman/Dheu-/releases).
 
-## What's in 0.1.0
+## What's in 0.2.0
 
-Sign-up with an invite code and a public or private account, sign-in, and the privacy choice for older accounts that never made one. The home feed with stories, posts with swipeable photos, double-tap likes, comments and a likers list, and sharing a new post of up to 10 photos. Profiles with follow, unfollow, follow requests, follower lists, blocking and search. Stories you can view, post, react to, reply to and check who has seen. Activity with follow requests to accept or decline. Messages with notes, 1-to-1 and group chats, photos, swipe-to-reply, unsend, delete chat for yourself, and the announcements thread. Settings for your profile, account type, theme, password, blocked accounts and invite codes.
+Everything a member can do on the website, except the admin panel, which stays there.
 
-Voice messages play, but you can't record one yet. Creating or managing groups, highlights, the admin panel and push notifications are still website-only.
+- Sign-up with an invite code and a public or private account, sign-in, and the privacy choice for older accounts that never made one.
+- The home feed with stories and, now and then, "Suggested for you". Posts with swipeable photos, double-tap likes, comments and a likers list, and sharing a new post of up to 10 photos.
+- Profiles with follow, unfollow, follow requests, follower lists, blocking, search, and highlights: view them, make one from your stories, add a story to one from the story itself, remove a story or delete a highlight.
+- Stories you can view, post, react to, reply to and check who has seen.
+- Activity with follow requests to accept or decline.
+- Messages with notes, 1-to-1 and group chats, photos, voice messages (record up to 2 minutes), swipe-to-reply, unsend, delete chat for yourself, and the announcements thread. Groups: start one, rename it, add people, remove people (the owner) and leave.
+- @mentions in captions, comments and group chats, with suggestions as you type. The person mentioned gets an Activity entry and a notification.
+- Push notifications for messages, mentions, comments, likes, follows and announcements, with a switch in Settings.
+- Settings for your profile, account type, notifications, theme, password, blocked accounts and invite codes.
+
+Screens slide in from the right and back out, and the back gesture drags the page with your finger, as on Instagram. Stories and highlights fade in and out.
+
+0.2.0 is signed with a new release key (the first one was lost), so it won't install over 0.1.0: uninstall 0.1.0 first. Nothing is lost, since everything lives on the server; you just log in again.
 
 ## Building
 
@@ -24,6 +36,15 @@ dheu.siteUrl=https://<your-deployment>.vercel.app
 ```
 
 `dheu.supabaseKey` is the publishable key, the same value as `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the website's `.env.local`. Never put the secret key here: everything in an APK can be read back out. `dheu.siteUrl` must point at a deployment of this repo, because sign-up and invite codes go through its `/api/auth/signup` and `/api/invites`. Without it the build uses `https://dheu-beige.vercel.app`.
+
+### Push notifications (Firebase)
+
+Push goes through Firebase Cloud Messaging. Without a Firebase project the app still builds and works; it just never notifies.
+
+1. In the [Firebase console](https://console.firebase.google.com), create a project (Analytics isn't needed) and add an Android app with the package name `com.salmansaadiq.dheu`.
+2. Download its `google-services.json` into `android/app/`. Git ignores it. The build reads the app ID, API key, project ID and sender ID from it; there's no google-services Gradle plugin.
+3. For sending, open Project settings → Service accounts → Generate new private key. Put the whole JSON file's contents in the website's `FCM_SERVICE_ACCOUNT` environment variable on Vercel and redeploy. The key is a secret: keep it out of the repo and out of the app. `/api/health` shows `fcmProject` once the website can read it.
+4. Run `supabase/migrations/0020_mentions_app_push.sql`, which adds the `push_devices` table the app registers its token in.
 
 Then build a debug APK:
 
@@ -44,12 +65,14 @@ Create a signing key once, outside the repo. Back up the `.jks` file and its pas
 keytool -genkeypair -v -keystore dheu-release.jks -alias dheu -keyalg RSA -keysize 4096 -validity 10000
 ```
 
+If the key is ever lost, the next build has to be signed with a new one, and every tester has to uninstall the old app once before installing it. That happened between 0.1.0 and 0.2.0.
+
 Build, sign with `apksigner` from the SDK's `build-tools` folder (it asks for the password), and check the result:
 
 ```bash
 ./gradlew assembleRelease
-apksigner sign --ks dheu-release.jks --ks-key-alias dheu --out Dheu-0.1.0.apk app/build/outputs/apk/release/app-release-unsigned.apk
-apksigner verify --print-certs Dheu-0.1.0.apk
+apksigner sign --ks dheu-release.jks --ks-key-alias dheu --out Dheu-0.2.0.apk app/build/outputs/apk/release/app-release-unsigned.apk
+apksigner verify --print-certs Dheu-0.2.0.apk
 ```
 
 Raise `versionCode` and `versionName` in `app/build.gradle.kts` before each release. Google Play takes an app bundle (`./gradlew bundleRelease`) rather than an APK; with Play App Signing, the key above becomes your upload key.
@@ -63,7 +86,11 @@ app/src/main/java/com/salmansaadiq/dheu/
   data/               the Supabase client and one object per area:
                       Account, Profiles, Posts, Stories, Chat, Notes, Activity
   data/Images.kt      photo resizing and JPEG encoding
-  ui/nav/             type-safe routes, the bottom bar, the privacy gate
+  data/Mentions.kt    reading @mentions (same rule as the website and the database)
+  data/Push.kt        Firebase setup and this phone's token in push_devices
+  push/               the messaging service and the notifications it builds
+  ui/nav/             type-safe routes, screen transitions, the bottom bar, the privacy gate,
+                      and opening a tapped notification's screen
   ui/auth, feed, post, profile, search, activity, create, stories, messages, settings
                       the screens
   ui/components/      shared pieces: avatars, buttons, fields, sheets, dialogs

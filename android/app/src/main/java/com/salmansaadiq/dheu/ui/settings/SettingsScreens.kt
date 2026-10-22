@@ -1,6 +1,9 @@
 package com.salmansaadiq.dheu.ui.settings
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,9 +32,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,6 +56,8 @@ import com.salmansaadiq.dheu.core.parseInstant
 import com.salmansaadiq.dheu.data.Account
 import com.salmansaadiq.dheu.data.InviteCode
 import com.salmansaadiq.dheu.data.Profiles
+import com.salmansaadiq.dheu.data.Push
+import com.salmansaadiq.dheu.data.PushPrefs
 import com.salmansaadiq.dheu.data.ThemePrefs
 import com.salmansaadiq.dheu.data.friendly
 import com.salmansaadiq.dheu.ui.Load
@@ -127,8 +135,8 @@ fun SettingsScreen() {
                 }
             }
 
-            Card("Notifications") {
-                Text("Push notifications arrive in a later version of the app. Until then, turn them on from the website on this phone (Settings → Notifications).", color = c.inkMuted)
+            Card("Notifications", "Messages, mentions, comments, likes and follow requests on this phone.") {
+                NotificationsSetting()
             }
 
             InvitesCard(app.userId)
@@ -422,4 +430,74 @@ fun BlockedScreen() {
                 }
         }
     }
+}
+
+/** On / off for push on this phone. Off removes the phone from the member's devices, so nothing is sent to it. */
+@Composable
+private fun NotificationsSetting() {
+    val context = LocalContext.current
+    val app = context.applicationContext
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    val c = Dheu.colors
+    if (!Push.configured) {
+        Text("This build of the app was made without push settings (see android/README.md).", color = c.inkMuted)
+        return
+    }
+    val enabled by remember { PushPrefs.enabled(app) }.collectAsStateWithLifecycle(initialValue = true)
+    // The permission can change in Android's settings while Dheu is in the background.
+    var allowed by remember { mutableStateOf(Push.allowed(app)) }
+    LifecycleResumeEffect(Unit) {
+        allowed = Push.allowed(app)
+        onPauseOrDispose {}
+    }
+    fun openSystemSettings() {
+        context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        allowed = granted
+        if (granted) {
+            scope.launch { runCatching { Push.register() }.onFailure { toast(it.friendly("Couldn't turn notifications on.")) } }
+        } else {
+            toast("Allow notifications for Dheu in Android's settings.")
+            openSystemSettings()
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            when {
+                !enabled -> "Off on this phone."
+                !allowed -> "Android is blocking Dheu's notifications."
+                else -> "On. You'll hear about new activity even when the app is closed."
+            },
+            color = c.inkMuted,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = enabled && allowed,
+            onCheckedChange = { on ->
+                scope.launch {
+                    PushPrefs.setEnabled(app, on)
+                    when {
+                        !on -> {
+                            Push.unregister()
+                            Push.forgetToken()
+                        }
+                        allowed -> runCatching { Push.register() }.onFailure { toast(it.friendly("Couldn't turn notifications on.")) }
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else -> openSystemSettings()
+                    }
+                }
+            },
+            colors = SwitchDefaults.colors(checkedTrackColor = c.brand, checkedThumbColor = c.brandInk),
+        )
+    }
+    Text(
+        "If you've also installed the website on this phone and turned its notifications on, you'll get each one twice. Keep one of the two.",
+        color = c.inkFaint,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(top = 8.dp),
+    )
 }

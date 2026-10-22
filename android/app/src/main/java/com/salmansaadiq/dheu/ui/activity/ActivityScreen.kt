@@ -114,7 +114,7 @@ private fun bucket(iso: String, now: Instant): String {
 @Composable
 private fun ActivityList(data: ActivityData, onChanged: () -> Unit) {
     if (data.items.isEmpty()) {
-        EmptyState("Nothing yet", "Follow requests, likes, comments and story reactions will show up here.")
+        EmptyState("Nothing yet", "Follow requests, likes, comments, mentions and story reactions will show up here.")
         return
     }
     val now = remember { Instant.now() }
@@ -142,12 +142,18 @@ private fun NotificationItem(n: NotificationRow, relationships: Relationships, o
     val nav = LocalNav.current
     val me = LocalAppState.current.userId
     val c = Dheu.colors
+    val chat = n.type == "mention" && n.conversationId != null
     val text = when (n.type) {
         "like" -> "liked your post."
         "follow" -> "started following you."
         "follow_request" -> "wants to follow you."
         "follow_accepted" -> "accepted your follow request."
         "comment" -> "commented: ${n.comment?.body ?: "…"}"
+        "mention" -> when {
+            chat -> "mentioned you in ${n.conversation?.title ?: "a group"}" + (n.message?.body?.let { ": $it" } ?: ".")
+            n.comment != null -> "mentioned you in a comment: ${n.comment.body}"
+            else -> "mentioned you in a post."
+        }
         else -> "reacted to your story."
     }
     val social = n.type in setOf("follow", "follow_request", "follow_accepted")
@@ -174,6 +180,10 @@ private fun NotificationItem(n: NotificationRow, relationships: Relationships, o
         when {
             n.type == "follow_request" -> RequestButtons(actor.id, me, onChanged)
             social -> FollowButton(actor.id, relationships.stateOf(actor.id))
+            chat -> Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).background(c.surface2).clickable { nav.chat(n.conversationId) },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Lucide.MessagesSquare, "Open chat", tint = c.inkMuted, modifier = Modifier.size(20.dp)) }
             thumb != null -> AsyncImage(
                 model = thumb,
                 contentDescription = "Open",

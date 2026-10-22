@@ -1,5 +1,6 @@
 package com.salmansaadiq.dheu
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.salmansaadiq.dheu.data.ThemePrefs
+import com.salmansaadiq.dheu.push.Notifications
+import com.salmansaadiq.dheu.ui.nav.DeepLinks
 import com.salmansaadiq.dheu.ui.nav.DheuRoot
 import com.salmansaadiq.dheu.ui.theme.Dheu
 import com.salmansaadiq.dheu.ui.theme.DheuTheme
@@ -25,6 +28,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) openFrom(intent)
         enableEdgeToEdge()
         setContent {
             val modes = remember { ThemePrefs.flow(applicationContext) }
@@ -42,5 +46,15 @@ class MainActivity : ComponentActivity() {
                 Surface(color = Dheu.colors.canvas, modifier = Modifier.fillMaxSize()) { DheuRoot() }
             }
         }
+    }
+
+    // singleTask: tapping a notification while the app is open lands here.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    private fun openFrom(intent: Intent?) {
+        intent?.getStringExtra(Notifications.EXTRA_URL)?.let(DeepLinks::open)
     }
 }

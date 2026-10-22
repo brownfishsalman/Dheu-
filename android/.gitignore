@@ -11,6 +11,9 @@ captures/
 # Machine-specific: SDK path and the Supabase settings (see README)
 local.properties
 
+# Firebase app config for push notifications (see README)
+google-services.json
+
 # Signing keys and passwords: never commit these
 *.jks
 *.keystore

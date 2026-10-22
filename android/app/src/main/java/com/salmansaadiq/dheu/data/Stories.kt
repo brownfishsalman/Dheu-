@@ -105,4 +105,107 @@ object Stories {
             filter { eq("story_id", storyId) }
             order("viewed_at", Order.DESCENDING)
         }.decodeList<ViewerRow>().mapNotNull { it.viewer }
+
+    // ---- highlights: stories kept on a profile after they expire (same tables as the website) ----
+
+    @Serializable
+    private data class ImagePath(@SerialName("image_path") val imagePath: String)
+
+    @Serializable
+    private data class HighlightItemRow(val story: ImagePath? = null)
+
+    @Serializable
+    private data class HighlightRow(
+        val id: String,
+        val title: String,
+        val cover: ImagePath? = null,
+        val items: List<HighlightItemRow> = emptyList(),
+    )
+
+    /** A profile's highlights in order; the cover is the chosen story, else the first one. */
+    suspend fun highlights(ownerId: String): List<HighlightSummary> =
+        client.from("story_highlights").select(
+            Columns.raw(
+                "id, title, cover:stories!story_highlights_cover_story_id_fkey(image_path), items:highlight_items(story:stories(image_path))",
+            ),
+        ) {
+            filter { eq("owner_id", ownerId) }
+            order("position", Order.ASCENDING)
+            order("created_at", Order.ASCENDING)
+        }.decodeList<HighlightRow>().map { h ->
+            HighlightSummary(h.id, h.title, h.cover?.imagePath ?: h.items.firstNotNullOfOrNull { it.story?.imagePath }, h.items.size)
+        }
+
+    @Serializable
+    private data class HighlightStoryRow(val story: StoryRow? = null)
+
+    @Serializable
+    private data class HighlightDetailRow(
+        val id: String,
+        val title: String,
+        val owner: Person? = null,
+        val items: List<HighlightStoryRow> = emptyList(),
+    )
+
+    suspend fun highlight(id: String): HighlightDetail? {
+        val row = client.from("story_highlights").select(
+            Columns.raw(
+                "id, title, owner:profiles!story_highlights_owner_id_fkey($PERSON), " +
+                    "items:highlight_items(story:stories(id, author_id, image_path, width, height, created_at, expires_at))",
+            ),
+        ) { filter { eq("id", id) } }.decodeSingleOrNull<HighlightDetailRow>() ?: return null
+        val owner = row.owner ?: return null
+        val stories = row.items.mapNotNull { it.story }.sortedBy { it.createdAt }
+            .map { Story(it.id, it.authorId, it.imagePath, it.width, it.height, it.createdAt, seen = true) }
+        return HighlightDetail(row.id, row.title, owner, stories)
+    }
+
+    /** My stories that can go into a highlight: active ones, and ones already in a highlight. */
+    suspend fun storiesForHighlights(me: String): List<StoryRow> =
+        client.from("stories").select(Columns.raw("id, author_id, image_path, width, height, created_at, expires_at")) {
+            filter { eq("author_id", me) }
+            order("created_at", Order.DESCENDING)
+            limit(200)
+        }.decodeList()
+
+    @Serializable
+    private data class HighlightInsert(
+        @SerialName("owner_id") val ownerId: String,
+        val title: String,
+        @SerialName("cover_story_id") val coverStoryId: String,
+        val position: Int,
+    )
+
+    @Serializable
+    private data class HighlightItemInsert(@SerialName("highlight_id") val highlightId: String, @SerialName("story_id") val storyId: String)
+
+    /** Creates the highlight with these stories (the first is the cover) and returns its id. */
+    suspend fun createHighlight(me: String, title: String, storyIds: List<String>, position: Int): String {
+        val id = client.from("story_highlights").insert(HighlightInsert(me, title.trim(), storyIds.first(), position)) {
+            select(Columns.raw("id"))
+        }.decodeSingle<IdRow>().id
+        try {
+            client.from("highlight_items").insert(storyIds.map { HighlightItemInsert(id, it) })
+        } catch (e: Exception) {
+            runCatching { deleteHighlight(id) }
+            throw e
+        }
+        return id
+    }
+
+    suspend fun addToHighlight(highlightId: String, storyId: String) {
+        client.from("highlight_items").upsert(HighlightItemInsert(highlightId, storyId)) {
+            onConflict = "highlight_id,story_id"
+            ignoreDuplicates = true
+        }
+    }
+
+    suspend fun removeFromHighlight(highlightId: String, storyId: String) {
+        client.from("highlight_items").delete { filter { eq("highlight_id", highlightId); eq("story_id", storyId) } }
+    }
+
+    /** The highlight goes; its stories are kept (and expire as usual if they're in no other highlight). */
+    suspend fun deleteHighlight(id: String) {
+        client.from("story_highlights").delete { filter { eq("id", id) } }
+    }
 }

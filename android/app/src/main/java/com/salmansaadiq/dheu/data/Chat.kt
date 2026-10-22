@@ -9,6 +9,7 @@ import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.ktor.http.ContentType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
@@ -17,8 +18,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import java.io.File
+import java.util.UUID
 import kotlin.random.Random
 
 /** Only the columns members may insert (0012 grants exactly these). */
@@ -29,9 +34,20 @@ data class MessageInsert(
     val body: String,
     @SerialName("story_id") val storyId: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
+    @SerialName("audio_path") val audioPath: String? = null,
+    @SerialName("audio_duration_ms") val audioDurationMs: Long? = null,
     @SerialName("reply_to_id") val replyToId: String? = null,
     @SerialName("note_text") val noteText: String? = null,
 )
+
+/** A recorded voice message waiting to be sent: an AAC .m4a in the app's cache. */
+class VoiceClip(val file: File, val durationMs: Long)
+
+/** Same limits as the website (src/lib/constants.ts) and the database functions (0011). */
+const val VOICE_MAX_SECONDS = 120
+const val GROUP_MAX_MEMBERS = 50
+const val GROUP_MIN_OTHERS = 2
+const val GROUP_TITLE_MAX = 60
 
 sealed interface ChatEvent {
     data class Inserted(val id: String) : ChatEvent
@@ -116,17 +132,38 @@ object Chat {
     suspend fun insertMessage(message: MessageInsert): Message =
         client.from("messages").insert(message) { select(Columns.raw(MESSAGE_SELECT)) }.decodeSingle()
 
-    /** Uploads the photo first (if any); if the message can't be saved, the file is removed again. */
-    suspend fun send(conversationId: String, me: String, body: String, photo: Images.Encoded?, replyToId: String?): Message {
+    /** Uploads the photo or voice message first (if any); if the message can't be saved, the file is removed again. */
+    suspend fun send(
+        conversationId: String,
+        me: String,
+        body: String,
+        photo: Images.Encoded?,
+        replyToId: String?,
+        voice: VoiceClip? = null,
+    ): Message {
         val imagePath = photo?.let {
             val path = Images.newPath(me)
             uploadFile(Buckets.CHAT, path, it.bytes, ContentType.Image.JPEG, CACHE_WEEK)
             path
         }
+        val audioPath = voice?.let {
+            val path = "$me/${UUID.randomUUID()}.m4a"
+            val bytes = withContext(Dispatchers.IO) { it.file.readBytes() }
+            uploadFile(Buckets.CHAT, path, bytes, ContentType("audio", "mp4"), CACHE_WEEK)
+            path
+        }
         return try {
-            insertMessage(MessageInsert(conversationId, me, body, imagePath = imagePath, replyToId = replyToId))
+            insertMessage(
+                MessageInsert(
+                    conversationId, me, body,
+                    imagePath = imagePath,
+                    audioPath = audioPath,
+                    audioDurationMs = voice?.durationMs,
+                    replyToId = replyToId,
+                ),
+            )
         } catch (e: Exception) {
-            if (imagePath != null) removeFiles(Buckets.CHAT, listOf(imagePath))
+            removeFiles(Buckets.CHAT, listOfNotNull(imagePath, audioPath))
             throw e
         }
     }
@@ -154,6 +191,57 @@ object Chat {
     /** Find or create my 1-to-1 conversation with someone. */
     suspend fun directConversation(otherId: String): String =
         Backend.db.rpc("get_or_create_conversation", buildJsonObject { put("p_other_id", otherId) }).decodeAs<String>()
+
+    // ---- groups: every rule lives in the database functions (0011), as on the website ----
+
+    /** Returns the new group's conversation id. */
+    suspend fun createGroup(title: String, memberIds: List<String>): String =
+        Backend.db.rpc(
+            "create_group_conversation",
+            buildJsonObject {
+                put("p_title", title.trim())
+                putJsonArray("p_member_ids") { memberIds.forEach { add(it) } }
+            },
+        ).decodeAs<String>()
+
+    suspend fun addMembers(conversationId: String, memberIds: List<String>) {
+        Backend.db.rpc(
+            "add_group_members",
+            buildJsonObject {
+                put("p_conversation_id", conversationId)
+                putJsonArray("p_member_ids") { memberIds.forEach { add(it) } }
+            },
+        )
+    }
+
+    suspend fun rename(conversationId: String, title: String) {
+        Backend.db.rpc("rename_group", buildJsonObject { put("p_conversation_id", conversationId); put("p_title", title.trim()) })
+    }
+
+    suspend fun removeMember(conversationId: String, userId: String) {
+        Backend.db.rpc("remove_group_member", buildJsonObject { put("p_conversation_id", conversationId); put("p_user_id", userId) })
+    }
+
+    suspend fun leave(conversationId: String) {
+        Backend.db.rpc("leave_group", buildJsonObject { put("p_conversation_id", conversationId) })
+    }
+
+    /** The creator while still a member, otherwise the longest-standing member. */
+    suspend fun owner(conversationId: String): String? =
+        Backend.db.rpc("group_owner", buildJsonObject { put("p_conversation_id", conversationId) }).decodeAs<String?>()
+
+    /** The database's group error codes as sentences (same wording as the website). */
+    fun groupError(e: Throwable): String {
+        val m = e.message.orEmpty()
+        return when {
+            "GROUP_TOO_SMALL" in m -> "Pick at least two other people."
+            "GROUP_TOO_BIG" in m -> "A group can have up to $GROUP_MAX_MEMBERS people."
+            "GROUP_TITLE" in m -> "Give the group a name (up to $GROUP_TITLE_MAX characters)."
+            "NOT_OWNER" in m -> "Only the group's owner can remove people."
+            "not a member" in m -> "You're not in this group."
+            else -> e.friendly()
+        }
+    }
 
     suspend fun announcementSummary(): Pair<Announcement?, Int> {
         val latest = client.from("announcements").select(Columns.raw("id, body, created_at, author_id")) {

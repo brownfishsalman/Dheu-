@@ -33,7 +33,11 @@ object Account {
         }
     }
 
-    suspend fun signOut() = Backend.auth.signOut()
+    suspend fun signOut() {
+        runCatching { Push.unregister() } // needs the session, so before signing out
+        Backend.auth.signOut()
+        Push.forgetToken()
+    }
 
     suspend fun changePassword(password: String) {
         Backend.auth.updateUser { this.password = password }

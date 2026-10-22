@@ -29,10 +29,11 @@
 |---|---|
 | **Public or private** | Each member picks one at sign-up and can switch later in Settings. Anyone in the community can see a public account's posts, stories, highlights and followers, and following it is instant. Following a private account sends a request that the owner accepts or declines from Activity, and only approved followers see what they post. Switching to public approves any pending requests. Row Level Security in Postgres enforces these rules. Blocking someone removes every tie between the two of you, in both directions, and hides you from each other. |
 | **Posts** | 1 to 10 photos per post in a swipeable carousel, at any aspect ratio, with a caption, likes (double-tap works too) and comments. Every post expires 3 months after it's shared. |
+| **Mentions** | Type @ in a caption, a comment or a group chat to tag someone, with suggestions as you type. They get an Activity entry and a notification, but only if they're allowed to see the post, or are in the group. |
 | **Notes** | A 60-character note that sits above your avatar at the top of Messages for 24 hours. Mutual follows can see it, and a reply arrives as a DM that quotes the note. |
 | **Stories** | 24-hour photo stories in a full-screen viewer with progress bars, tap, hold and swipe gestures, and keyboard controls on desktop. Viewers can react with an emoji or reply in chat, you can see who has seen each story, and Highlights keep chosen stories on your profile for good. |
 | **Chat** | 1-to-1 and group chats delivered over WebSockets. A group holds up to 50 people; any member can add people or rename it, and the creator can remove people. Photos and voice messages (recorded in the browser, up to 2 minutes) disappear after 7 days. You can swipe to reply with a quote, unsend your own messages, and delete a chat from your inbox without affecting anyone else's. Unread badges, and a pinned read-only announcements thread from the admin in every inbox. |
-| **Activity and push** | Follow requests, accepted requests, likes, comments, new followers and story reactions each raise an alert. Database triggers create them, a live badge counts them, and installed PWAs receive them as Web Push notifications (on Android, and on iOS 16.4+ from the Home Screen). |
+| **Activity and push** | Follow requests, accepted requests, likes, comments, mentions, new followers and story reactions each raise an alert. Database triggers create them and a live badge counts them. Installed PWAs receive them as Web Push notifications (on Android, and on iOS 16.4+ from the Home Screen), and the Android app through Firebase Cloud Messaging. |
 | **Discovery** | People search, follower lists, and a "Suggested for you" strip, chosen by the admin, that turns up in the feed now and then. |
 | **Photos** | Resized to 1080 px on the device before upload. HEIC files become JPEGs, EXIF orientation is applied, and GPS and other metadata are stripped. |
 | **Accounts** | Email and password. Sign-up needs an invite code; members create single-use codes for friends and share them from Settings. The first account becomes the admin. Light, dark or system theme, and the website installs as a home-screen app (PWA). |
@@ -66,7 +67,7 @@
 
 [`android/`](android) holds a native Android app written in Kotlin with Jetpack Compose. It uses the same Supabase project and the same Row Level Security rules as the website, so a member can move between the two and see the same feed, chats and notifications. It runs on Android 9 and newer.
 
-Version 0.1.0 covers sign-up with an invite code and account type, the feed, posts (photos, likes, comments, sharing new ones), profiles with follow requests and public or private accounts, stories (viewing, posting, reactions and replies), Activity, and Messages with notes, 1-to-1 and group chats, photos, replies, unsend and delete chat. Settings has profile editing, account type, theme, password, blocked accounts and invite codes. Voice messages play in the app, but recording one, creating or managing a group, highlights, admin tools and push notifications are still website-only for now.
+Version 0.2.0 does everything a member can do on the website: the feed with suggestions, posts, profiles with highlights, stories, Activity, Messages with notes, voice messages and group chats you can start and manage, @mentions, and push notifications. Only the admin tools stay on the website.
 
 To try it, download the APK from the [latest release](https://github.com/brownfishsalman/Dheu-/releases/latest) on your phone and open it. Android will ask you to allow your browser to install apps; allow it for this one install. Build steps, release signing and a tour of the code are in [android/README.md](android/README.md).
 
@@ -78,12 +79,12 @@ flowchart LR
   A["Android app<br/>Kotlin + Jetpack Compose<br/>supabase-kt"]
   V["Vercel (sin1)<br/>Next.js 16 server components,<br/>server actions, /api/*, nightly cron"]
   subgraph S["Supabase (ap-southeast-1)"]
-    DB[("Postgres<br/>24 tables · 67 RLS policies<br/>17 triggers · Vault")]
+    DB[("Postgres<br/>25 tables · 69 RLS policies<br/>20 triggers · Vault")]
     AUTH["Auth<br/>email + password, ES256 JWT"]
     ST["Storage<br/>avatars · posts · stories · chat"]
     RT["Realtime<br/>Postgres changes over WebSocket"]
   end
-  P["Push services<br/>FCM / APNs / Mozilla"]
+  P["Push services<br/>FCM / APNs / Mozilla<br/>(Web Push + Firebase for the app)"]
   B -- "pages & actions" --> V
   A -- "sign-up, invite codes<br/>(Bearer token)" --> V
   V -- "queries (user JWT) /<br/>privileged ops (secret key)" --> DB
@@ -95,6 +96,7 @@ flowchart LR
   DB -- "pg_net webhook on<br/>notification / message / announcement" --> V
   V -- "Web Push (VAPID)" --> P
   P -- "push event" --> B
+  P -- "push (Firebase)" --> A
   B --> AUTH
   A --> AUTH
 ```
@@ -117,9 +119,13 @@ The secret key can't ship inside an APK, because anyone can unpack one. So the a
 
 Inserting a like, follow request, comment or story reaction fires a PL/pgSQL trigger that writes a notification row, and unliking or declining deletes it again. Realtime streams the insert to the recipient's open tab or app.
 
+### Mentions are read by the database
+
+`mentioned_profiles()` finds the @usernames in a caption, comment or group message, with the same rule the website and the app use to link them. Triggers on comments, the first photo of a post, and group messages turn them into notifications, but only for people allowed to see the post, or in the group, and never across a block. A mention in a group replaces that person's ordinary message notification, so they get one, not two.
+
 ### Push: database, then site, then device
 
-A second trigger on notifications, messages and announcements calls the site's `/api/push` through `pg_net`. The call is asynchronous, carries a shared secret kept in Supabase Vault, and can't block the original insert. The endpoint looks up the recipient's devices and sends a VAPID-signed Web Push; the service worker shows it and opens the right screen on tap. Read markers use the database clock, so a phone with a wrong clock can't leave things marked unread.
+A second trigger on notifications, messages and announcements calls the site's `/api/push` through `pg_net`. The call is asynchronous, carries a shared secret kept in Supabase Vault, and can't block the original insert. The endpoint looks up the recipient's devices and sends a VAPID-signed Web Push to browsers, and a Firebase Cloud Messaging message to the Android app, signed in with a service account and no extra library. The service worker or the app shows it and opens the right screen on tap. Read markers use the database clock, so a phone with a wrong clock can't leave things marked unread.
 
 ### Photos are processed on the device
 
@@ -137,12 +143,12 @@ Vercel's functions are pinned to the database's region (`vercel.json`), which on
 
 - Website: Next.js 16 (App Router, Turbopack, server actions, `proxy.ts` for session refresh), React 19 and strict TypeScript. A hand-written `Database` type mirrors the schema, so every query is type-checked.
 - Styling: Tailwind CSS 4 with a small set of tokens, light and dark themes, Inter and Outfit.
-- Android: Kotlin, Jetpack Compose with Material 3, Navigation Compose, supabase-kt over Ktor and OkHttp, Coil for images, kotlinx.serialization.
+- Android: Kotlin, Jetpack Compose with Material 3, Navigation Compose, supabase-kt over Ktor and OkHttp, Coil for images, kotlinx.serialization, Firebase Cloud Messaging.
 - Supabase: Postgres (with `pg_net` webhooks and Vault), Auth, Storage and Realtime. The schema, policies and triggers are in [`supabase/migrations`](supabase/migrations).
 - Vercel for hosting and cron, with functions pinned to the database's region.
-- web-push (VAPID) for notifications, zod for input validation, lucide-react icons, heic-to for HEIC decoding.
+- web-push (VAPID) for browser notifications and Firebase Cloud Messaging for the app, zod for input validation, lucide-react icons, heic-to for HEIC decoding.
 
-About 10,600 lines of TypeScript, 6,500 of Kotlin and 2,400 of SQL (24 tables, 67 RLS policies, 17 triggers, 45 functions). The website has ten runtime dependencies.
+About 11,100 lines of TypeScript, 8,700 of Kotlin and 2,600 of SQL (25 tables, 69 RLS policies, 20 triggers, 51 functions). The website has ten runtime dependencies.
 
 ## Running it yourself
 
@@ -165,8 +171,9 @@ src/app/(app)/             everything behind login: feed, profiles, posts, stori
 src/app/api/auth/signup/   sign-up for the Android app (the invite check needs the secret key)
 src/app/api/invites/       invite codes for the Android app (Bearer token)
 src/app/api/cron/cleanup/  nightly expiry job
-src/app/api/push/          receives database webhooks, sends Web Push
-src/lib/push.ts            VAPID sending · src/lib/push-client.ts subscribe/unsubscribe · public/sw.js
+src/app/api/push/          receives database webhooks, sends Web Push and app push
+src/lib/push.ts            sending · src/lib/fcm.ts Firebase · src/lib/push-client.ts subscribe · public/sw.js
+src/lib/mentions.ts        reading @mentions (the database and the app use the same rule)
 src/proxy.ts               session refresh + login gate (runs on every request)
 src/components/            UI: post/ story/ chat/ activity/ profile/ admin/ nav/ ui/ brand/
 src/lib/data/              server-only query functions

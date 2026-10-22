@@ -1,5 +1,9 @@
 package com.salmansaadiq.dheu.ui.create
 
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.TextFieldValue
+import com.salmansaadiq.dheu.ui.components.MentionSuggestions
+import com.salmansaadiq.dheu.ui.components.fieldColors
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -90,7 +94,7 @@ private fun NewPost() {
     val c = Dheu.colors
     val scope = rememberCoroutineScope()
     var photos by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var caption by rememberSaveable { mutableStateOf("") }
+    var caption by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var progress by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -128,7 +132,16 @@ private fun NewPost() {
             Text("${photos.size} of $MAX_PHOTOS · the first photo sets the shape", color = c.inkFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
         }
         Spacer(Modifier.height(16.dp))
-        DheuTextField(caption, { caption = it }, "Write a caption…", singleLine = false, minLines = 3, maxLength = 2200)
+        OutlinedTextField(
+            value = caption,
+            onValueChange = { if (it.text.length <= 2200) caption = it },
+            label = { Text("Write a caption… @mention people") },
+            minLines = 3,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        MentionSuggestions(caption, onPick = { caption = it })
         error?.let { Text(it, color = c.danger, modifier = Modifier.padding(top = 8.dp)) }
         Spacer(Modifier.height(16.dp))
         PrimaryButton(
@@ -138,9 +151,9 @@ private fun NewPost() {
                 progress = "Preparing…"
                 scope.launch {
                     try {
-                        val id = Posts.create(context, me, photos, caption) { progress = it }
+                        val id = Posts.create(context, me, photos, caption.text) { progress = it }
                         photos = emptyList()
-                        caption = ""
+                        caption = TextFieldValue("")
                         nav.post(id)
                     } catch (e: Exception) {
                         error = e.friendly("Couldn't share the post.")

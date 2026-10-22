@@ -1,8 +1,10 @@
 package com.salmansaadiq.dheu.ui.messages
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -43,8 +45,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,24 +59,32 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.salmansaadiq.dheu.core.clock
 import com.salmansaadiq.dheu.core.dayLabel
 import com.salmansaadiq.dheu.core.daysLeft
+import com.salmansaadiq.dheu.core.formatDuration
 import com.salmansaadiq.dheu.core.localDate
 import com.salmansaadiq.dheu.core.minutesBetween
 import com.salmansaadiq.dheu.data.Backend
 import com.salmansaadiq.dheu.data.Buckets
 import com.salmansaadiq.dheu.data.Message
 import com.salmansaadiq.dheu.data.Person
+import com.salmansaadiq.dheu.data.VOICE_MAX_SECONDS
+import com.salmansaadiq.dheu.data.VoiceClip
 import com.salmansaadiq.dheu.data.replyLabel
+import com.salmansaadiq.dheu.push.Foreground
+import com.salmansaadiq.dheu.push.Notifications
 import com.salmansaadiq.dheu.ui.LocalAppState
 import com.salmansaadiq.dheu.ui.components.Avatar
 import com.salmansaadiq.dheu.ui.components.ConfirmDialog
@@ -80,12 +92,16 @@ import com.salmansaadiq.dheu.ui.components.DheuSheet
 import com.salmansaadiq.dheu.ui.components.DheuTopBar
 import com.salmansaadiq.dheu.ui.components.ErrorState
 import com.salmansaadiq.dheu.ui.components.Loading
+import com.salmansaadiq.dheu.ui.components.MentionSuggestions
+import com.salmansaadiq.dheu.ui.components.MentionText
 import com.salmansaadiq.dheu.ui.components.SheetAction
 import com.salmansaadiq.dheu.ui.components.fieldColors
 import com.salmansaadiq.dheu.ui.components.rememberToast
 import com.salmansaadiq.dheu.ui.icons.Lucide
+import com.salmansaadiq.dheu.ui.nav.GroupInfoRoute
 import com.salmansaadiq.dheu.ui.nav.LocalNav
 import com.salmansaadiq.dheu.ui.theme.Dheu
+import kotlinx.coroutines.delay
 
 private const val FORMER = "Former member"
 
@@ -96,6 +112,13 @@ fun ChatScreen(conversationId: String) {
     val vm: ChatViewModel = viewModel(key = "chat-$conversationId") { ChatViewModel(conversationId, app.userId) }
     // Leaving the chat may have changed what's unread.
     DisposableEffect(Unit) { onDispose { app.refreshBadges() } }
+    // While it's open, this chat's messages don't also arrive as notifications; any already there go.
+    val context = LocalContext.current
+    DisposableEffect(conversationId) {
+        Foreground.openChat = conversationId
+        Notifications.clearChat(context, conversationId)
+        onDispose { if (Foreground.openChat == conversationId) Foreground.openChat = null }
+    }
 
     val info = vm.info
     Column(Modifier.fillMaxSize().background(Dheu.colors.surface)) {
@@ -109,7 +132,7 @@ fun ChatScreen(conversationId: String) {
             onBack = nav::back,
             actions = {
                 if (info != null) {
-                    Box(Modifier.padding(end = 10.dp).clickable { info.peer?.let { nav.profile(it.username) } }) {
+                    Box(Modifier.padding(end = 10.dp).clickable { if (info.isGroup) nav.to(GroupInfoRoute(info.id)) else info.peer?.let { nav.profile(it.username) } }) {
                         if (info.isGroup) GroupAvatar(info.members.filter { it.id != app.userId }, 34.dp)
                         else info.peer?.let { Avatar(it.avatarPath, it.fullName, 34.dp) }
                     }
@@ -127,7 +150,9 @@ fun ChatScreen(conversationId: String) {
 
 @Composable
 private fun ChatBody(vm: ChatViewModel, isGroup: Boolean, canSend: Boolean, blockedByMe: Boolean) {
-    val me = LocalAppState.current.userId
+    val app = LocalAppState.current
+    val me = app.userId
+    val myProfile by app.me.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val toast = rememberToast()
     val c = Dheu.colors
@@ -170,6 +195,7 @@ private fun ChatBody(vm: ChatViewModel, isGroup: Boolean, canSend: Boolean, bloc
                             showName = isGroup && m.senderId != me && !grouped,
                             showAvatar = isGroup && m.senderId != me && endOfRun,
                             isGroup = isGroup,
+                            myUsername = myProfile?.username,
                             nameOf = ::nameOf,
                             onLongPress = { actionsFor = m },
                             onOpenImage = { lightbox = it },
@@ -196,7 +222,9 @@ private fun ChatBody(vm: ChatViewModel, isGroup: Boolean, canSend: Boolean, bloc
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
             )
         } else {
-            Composer(vm, replyTo, onCancelReply = { replyTo = null }, nameOf = ::nameOf, onSent = { replyTo = null })
+            // In a group, @ offers the other members.
+            val mentionable = if (isGroup) vm.info?.members.orEmpty().filter { it.id != me } else null
+            Composer(vm, replyTo, mentionable, onCancelReply = { replyTo = null }, nameOf = ::nameOf, onSent = { replyTo = null })
         }
     }
 
@@ -257,6 +285,7 @@ private fun Bubble(
     showName: Boolean,
     showAvatar: Boolean,
     isGroup: Boolean,
+    myUsername: String?,
     nameOf: (String) -> String,
     onLongPress: () -> Unit,
     onOpenImage: (String) -> Unit,
@@ -320,7 +349,16 @@ private fun Bubble(
                 if (m.imagePath == null && m.imageExpiresAt != null) Expired("Photo expired", fg)
                 if (audio != null) VoiceNote(audio, m.audioDurationMs, tint = fg, track = fg.copy(alpha = 0.3f))
                 if (m.audioPath == null && m.audioExpiresAt != null) Expired("Voice message expired", fg)
-                if (m.body.isNotEmpty()) Text(m.body, color = fg, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                if (m.body.isNotEmpty()) {
+                    MentionText(
+                        m.body,
+                        color = fg,
+                        mentionColor = if (mine) fg else c.brand,
+                        highlight = if (mine) null else myUsername,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
                 if (mediaExpiresAt != null) {
                     Text(
                         "disappears in ${daysLeft(mediaExpiresAt)}d · ${clock(m.createdAt)}",
@@ -344,14 +382,62 @@ private fun Expired(label: String, color: Color) {
 }
 
 @Composable
-private fun Composer(vm: ChatViewModel, replyTo: Message?, onCancelReply: () -> Unit, nameOf: (String) -> String, onSent: () -> Unit) {
+private fun Composer(
+    vm: ChatViewModel,
+    replyTo: Message?,
+    mentionable: List<Person>?,
+    onCancelReply: () -> Unit,
+    nameOf: (String) -> String,
+    onSent: () -> Unit,
+) {
     val c = Dheu.colors
     val context = LocalContext.current
-    var text by rememberSaveable { mutableStateOf("") }
+    val toast = rememberToast()
+    var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var photo by remember { mutableStateOf<Uri?>(null) }
+    var clip by remember { mutableStateOf<VoiceClip?>(null) }
+    val recorder = remember { VoiceRecorder(context.applicationContext) }
+    var recording by remember { mutableStateOf(false) }
+    var elapsed by remember { mutableLongStateOf(0L) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) photo = uri }
 
+    fun startRecording() {
+        try {
+            recorder.start()
+            elapsed = 0
+            recording = true
+        } catch (_: Exception) {
+            toast("Couldn't use the microphone.")
+        }
+    }
+    fun stopRecording() {
+        recording = false
+        clip = recorder.stop() ?: run {
+            toast("That was too short to send.")
+            null
+        }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording() else toast("Allow Dheu to use the microphone to record voice messages.")
+    }
+    LaunchedEffect(recording) {
+        while (recording) {
+            elapsed = recorder.elapsedMs
+            if (elapsed >= VOICE_MAX_SECONDS * 1000L) stopRecording()
+            delay(200)
+        }
+    }
+    // Leaving the chat drops a recording that wasn't sent.
+    val unsent by rememberUpdatedState(clip)
+    DisposableEffect(Unit) {
+        onDispose {
+            recorder.cancel()
+            unsent?.file?.delete()
+        }
+    }
+
     Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+        if (mentionable != null) MentionSuggestions(text, onPick = { text = it }, people = mentionable)
         replyTo?.let { r ->
             Row(Modifier.fillMaxWidth().background(c.surface2.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Lucide.Reply, null, tint = c.brand, modifier = Modifier.size(16.dp))
@@ -371,35 +457,75 @@ private fun Composer(vm: ChatViewModel, replyTo: Message?, onCancelReply: () -> 
                 IconButton(onClick = { photo = null }) { Icon(Lucide.X, "Remove photo", tint = c.inkMuted) }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !vm.sending) {
-                Icon(Lucide.ImagePlus, "Send a photo", tint = c.inkMuted)
+        clip?.let { voice ->
+            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(c.surface2)) {
+                    VoiceNote(voice.file.absolutePath, voice.durationMs, tint = c.ink, track = c.line)
+                }
+                IconButton(onClick = { voice.file.delete(); clip = null }) { Icon(Lucide.X, "Remove voice message", tint = c.inkMuted) }
             }
-            OutlinedTextField(
-                value = text,
-                onValueChange = { if (it.length <= 2000) text = it },
-                placeholder = { Text(if (photo != null) "Add a caption…" else "Message…") },
-                shape = RoundedCornerShape(24.dp),
-                colors = fieldColors(),
-                maxLines = 5,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(6.dp))
-            val canSend = (text.isNotBlank() || photo != null) && !vm.sending
-            Box(
-                Modifier.size(44.dp).clip(CircleShape).background(if (canSend) c.brand else c.surface2).clickable(enabled = canSend) {
-                    vm.send(context, text, photo, replyTo) { ok ->
-                        if (ok) {
-                            text = ""
-                            photo = null
-                            onSent()
-                        }
+            Text("Disappears 7 days after sending.", color = c.inkMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
+        }
+        if (recording) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { recording = false; recorder.cancel() }) { Icon(Lucide.Trash, "Discard recording", tint = c.inkMuted) }
+                Box(Modifier.size(10.dp).clip(CircleShape).background(c.danger))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "${formatDuration(elapsed)} / ${formatDuration(VOICE_MAX_SECONDS * 1000L)}",
+                    color = c.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(c.brand).clickable { stopRecording() },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Lucide.SquareFilled, "Stop recording", tint = c.brandInk, modifier = Modifier.size(16.dp)) }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !vm.sending && clip == null) {
+                    Icon(Lucide.ImagePlus, "Send a photo", tint = c.inkMuted)
+                }
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { if (it.text.length <= 2000) text = it },
+                    placeholder = { Text(if (photo != null || clip != null) "Add a caption…" else "Message…") },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = fieldColors(),
+                    maxLines = 5,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                val hasContent = text.text.isNotBlank() || photo != null || clip != null
+                if (!hasContent && !vm.sending) {
+                    // Mic until there's something to send, then the send button (as on the website).
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(c.brand).clickable {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
+                            else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Lucide.Mic, "Record a voice message", tint = c.brandInk, modifier = Modifier.size(20.dp)) }
+                } else {
+                    val canSend = hasContent && !vm.sending
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(if (canSend) c.brand else c.surface2).clickable(enabled = canSend) {
+                            vm.send(context, text.text, photo, replyTo, clip) { ok ->
+                                if (ok) {
+                                    text = TextFieldValue("")
+                                    photo = null
+                                    clip?.file?.delete()
+                                    clip = null
+                                    onSent()
+                                }
+                            }
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (vm.sending) CircularProgressIndicator(Modifier.size(20.dp), color = c.brandInk, strokeWidth = 2.dp)
+                        else Icon(Lucide.Send, "Send", tint = if (canSend) c.brandInk else c.inkFaint, modifier = Modifier.size(20.dp))
                     }
-                },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (vm.sending) CircularProgressIndicator(Modifier.size(20.dp), color = c.brandInk, strokeWidth = 2.dp)
-                else Icon(Lucide.Send, "Send", tint = if (canSend) c.brandInk else c.inkFaint, modifier = Modifier.size(20.dp))
+                }
             }
         }
     }

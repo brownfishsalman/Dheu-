@@ -1,7 +1,8 @@
 // Builds the Android launcher icon from the website's transparent logo mark
 // (public/brand/mark.png): an adaptive-icon foreground and a monochrome
 // layer (Android 13 themed icons) at every density, plus a 512 px Play Store
-// icon. The navy background is a colour resource. Run from the repo root:
+// icon and the white notification icon (ic_stat_dheu). The navy background
+// is a colour resource. Run from the repo root:
 //   node android/tools/generate-launcher-icons.mjs
 import sharp from "sharp";
 import { mkdirSync } from "node:fs";
@@ -40,6 +41,20 @@ for (const [density, factor] of Object.entries(DENSITIES)) {
   mkdirSync(dir, { recursive: true });
   await (await layer(size)).toFile(join(dir, "ic_launcher_foreground.png"));
   await (await layer(size, { monochrome: true })).toFile(join(dir, "ic_launcher_monochrome.png"));
+}
+
+// Notification icon: a 24dp white silhouette (Android tints it), filling most of the square.
+for (const [density, factor] of Object.entries(DENSITIES)) {
+  const size = Math.round(24 * factor);
+  const { data, info } = await sharp(MARK).resize({ height: Math.round(size * 0.92) }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < data.length; i += 4) data[i] = data[i + 1] = data[i + 2] = 255;
+  const glyph = await sharp(data, { raw: info }).png().toBuffer();
+  const dir = join(res, `drawable-${density}`);
+  mkdirSync(dir, { recursive: true });
+  await sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: glyph, left: Math.round((size - info.width) / 2), top: Math.round((size - info.height) / 2) }])
+    .png({ compressionLevel: 9 })
+    .toFile(join(dir, "ic_stat_dheu.png"));
 }
 
 await sharp(TILE).resize(512, 512).png({ compressionLevel: 9 }).toFile(join(here, "..", "play-store-icon-512.png"));

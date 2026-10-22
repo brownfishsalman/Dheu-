@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +29,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -50,6 +53,8 @@ import coil3.compose.AsyncImage
 import com.salmansaadiq.dheu.core.timeAgo
 import com.salmansaadiq.dheu.data.Backend
 import com.salmansaadiq.dheu.data.Buckets
+import com.salmansaadiq.dheu.data.HIGHLIGHT_TITLE_MAX
+import com.salmansaadiq.dheu.data.HighlightSummary
 import com.salmansaadiq.dheu.data.Person
 import com.salmansaadiq.dheu.data.Profiles
 import com.salmansaadiq.dheu.data.Stories
@@ -60,14 +65,18 @@ import com.salmansaadiq.dheu.ui.LocalAppState
 import com.salmansaadiq.dheu.ui.components.Avatar
 import com.salmansaadiq.dheu.ui.components.ConfirmDialog
 import com.salmansaadiq.dheu.ui.components.DheuSheet
+import com.salmansaadiq.dheu.ui.components.DheuTextField
 import com.salmansaadiq.dheu.ui.components.ErrorState
 import com.salmansaadiq.dheu.ui.components.Loading
 import com.salmansaadiq.dheu.ui.components.PersonRow
+import com.salmansaadiq.dheu.ui.components.PrimaryButton
+import com.salmansaadiq.dheu.ui.components.SheetAction
 import com.salmansaadiq.dheu.ui.components.rememberToast
 import com.salmansaadiq.dheu.ui.icons.Lucide
 import com.salmansaadiq.dheu.ui.nav.LocalNav
 import com.salmansaadiq.dheu.ui.nav.StoryRoute
 import com.salmansaadiq.dheu.ui.rememberLoader
+import com.salmansaadiq.dheu.ui.theme.Dheu
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -111,22 +120,64 @@ fun StoryViewerScreen(authorId: String) {
     }
 }
 
+/** A highlight on someone's profile: its stories play like a story, from the first one. */
 @Composable
-private fun StoryPlayer(group: StoryGroup, onNextGroup: () -> Unit, onPrevGroup: () -> Unit, onClose: () -> Unit, onDeleted: () -> Unit) {
+fun HighlightViewerScreen(highlightId: String) {
+    val nav = LocalNav.current
+    val loader = rememberLoader("highlight-$highlightId") { Stories.highlight(highlightId) }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when (val s = loader.state) {
+            Load.Loading -> Loading()
+            is Load.Failed -> ErrorState(s.message, onRetry = { loader.reload() })
+            is Load.Ready -> {
+                val h = s.value
+                if (h == null || h.stories.isEmpty()) {
+                    LaunchedEffect(Unit) { nav.back() }
+                } else {
+                    StoryPlayer(
+                        group = StoryGroup(h.owner, h.stories, allSeen = true, latestAt = ""),
+                        onNextGroup = nav::back,
+                        onPrevGroup = {},
+                        onClose = nav::back,
+                        onDeleted = { loader.reload() },
+                        highlight = HighlightRef(h.id, h.title),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private class HighlightRef(val id: String, val title: String)
+
+@Composable
+private fun StoryPlayer(
+    group: StoryGroup,
+    onNextGroup: () -> Unit,
+    onPrevGroup: () -> Unit,
+    onClose: () -> Unit,
+    onDeleted: () -> Unit,
+    highlight: HighlightRef? = null,
+) {
     val me = LocalAppState.current.userId
     val nav = LocalNav.current
     val isOwner = group.author.id == me
     val scope = rememberCoroutineScope()
     val toast = rememberToast()
-    var index by remember(group.author.id) { mutableIntStateOf(group.stories.indexOfFirst { !it.seen }.coerceAtLeast(0)) }
+    var index by remember(group.author.id) {
+        mutableIntStateOf(if (highlight != null) 0 else group.stories.indexOfFirst { !it.seen }.coerceAtLeast(0))
+    }
     var progress by remember { mutableFloatStateOf(0f) }
     var holding by remember { mutableStateOf(false) }
     var typing by remember { mutableStateOf(false) }
     var reply by remember { mutableStateOf("") }
     var seenBy by remember { mutableStateOf<List<Person>?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var addingToHighlight by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var confirmDeleteHighlight by remember { mutableStateOf(false) }
     val story = group.stories[index.coerceIn(0, group.stories.lastIndex)]
-    val paused = holding || typing || seenBy != null || confirmDelete
+    val paused = holding || typing || seenBy != null || confirmDelete || addingToHighlight || confirmRemove || confirmDeleteHighlight
 
     fun next() {
         if (index < group.stories.lastIndex) index++ else onNextGroup()
@@ -137,7 +188,7 @@ private fun StoryPlayer(group: StoryGroup, onNextGroup: () -> Unit, onPrevGroup:
 
     LaunchedEffect(story.id) {
         progress = 0f
-        if (!isOwner) runCatching { Stories.markViewed(story.id, me) }
+        if (!isOwner && highlight == null) runCatching { Stories.markViewed(story.id, me) }
     }
     LaunchedEffect(story.id, paused) {
         while (progress < 1f) {
@@ -188,14 +239,22 @@ private fun StoryPlayer(group: StoryGroup, onNextGroup: () -> Unit, onPrevGroup:
                     Spacer(Modifier.width(8.dp))
                     Text(group.author.username, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.width(8.dp))
-                    Text(timeAgo(story.createdAt), color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                    Text(highlight?.title ?: timeAgo(story.createdAt), color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 1)
                 }
                 IconButton(onClick = onClose) { Icon(Lucide.X, "Close", tint = Color.White) }
             }
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().padding(12.dp)) {
-            if (isOwner) {
+            if (highlight != null) {
+                if (isOwner) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill(Lucide.X, "Remove story") { confirmRemove = true }
+                        Spacer(Modifier.weight(1f))
+                        Pill(Lucide.Trash, "Delete highlight") { confirmDeleteHighlight = true }
+                    }
+                }
+            } else if (isOwner) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
                         Modifier.weight(1f).clickable {
@@ -207,6 +266,7 @@ private fun StoryPlayer(group: StoryGroup, onNextGroup: () -> Unit, onPrevGroup:
                         Spacer(Modifier.width(6.dp))
                         Text("Seen by", color = Color.White)
                     }
+                    IconButton(onClick = { addingToHighlight = true }) { Icon(Lucide.CirclePlus, "Add to highlight", tint = Color.White) }
                     IconButton(onClick = { confirmDelete = true }) { Icon(Lucide.Trash, "Delete story", tint = Color.White) }
                 }
             } else {
@@ -271,5 +331,111 @@ private fun StoryPlayer(group: StoryGroup, onNextGroup: () -> Unit, onPrevGroup:
             },
             onDismiss = { confirmDelete = false },
         )
+    }
+    if (addingToHighlight) {
+        AddToHighlightSheet(story.id, onDismiss = { addingToHighlight = false }, onAdded = { title -> toast("Added to $title") })
+    }
+    if (highlight != null && confirmRemove) {
+        ConfirmDialog(
+            "Remove this story from the highlight?",
+            "The story itself is kept.",
+            "Remove",
+            onConfirm = {
+                scope.launch {
+                    try {
+                        Stories.removeFromHighlight(highlight.id, story.id)
+                        onDeleted()
+                    } catch (e: Exception) {
+                        toast(e.friendly("Couldn't remove it."))
+                    }
+                }
+            },
+            onDismiss = { confirmRemove = false },
+        )
+    }
+    if (highlight != null && confirmDeleteHighlight) {
+        ConfirmDialog(
+            "Delete “${highlight.title}”?",
+            "The highlight goes from your profile. The stories themselves are kept.",
+            "Delete",
+            onConfirm = {
+                scope.launch {
+                    try {
+                        Stories.deleteHighlight(highlight.id)
+                        onClose()
+                    } catch (e: Exception) {
+                        toast(e.friendly("Couldn't delete the highlight."))
+                    }
+                }
+            },
+            onDismiss = { confirmDeleteHighlight = false },
+        )
+    }
+}
+
+@Composable
+private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.15f)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Put one of my stories into an existing highlight, or a new one named here. */
+@Composable
+private fun AddToHighlightSheet(storyId: String, onDismiss: () -> Unit, onAdded: (String) -> Unit) {
+    val me = LocalAppState.current.userId
+    val scope = rememberCoroutineScope()
+    var highlights by remember { mutableStateOf<List<HighlightSummary>?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var title by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        highlights = runCatching { Stories.highlights(me) }.getOrDefault(emptyList())
+        if (highlights.isNullOrEmpty()) creating = true
+    }
+
+    fun go(action: suspend () -> String) {
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                onAdded(action())
+                onDismiss()
+            } catch (e: Exception) {
+                error = e.friendly("Couldn't add it. Try again.")
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    DheuSheet("Add to highlight", onDismiss = onDismiss) {
+        val list = highlights
+        if (list == null) {
+            Loading(Modifier.height(120.dp))
+            return@DheuSheet
+        }
+        if (!creating) {
+            list.forEach { h -> SheetAction(Lucide.Plus, h.title, { if (!busy) go { Stories.addToHighlight(h.id, storyId); h.title } }) }
+            SheetAction(Lucide.CirclePlus, "New highlight", { creating = true })
+        } else {
+            DheuTextField(title, { title = it }, "Highlight name", maxLength = HIGHLIGHT_TITLE_MAX)
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton(
+                "Create",
+                { go { Stories.createHighlight(me, title, listOf(storyId), position = list.size); title.trim() } },
+                Modifier.fillMaxWidth(),
+                enabled = title.isNotBlank(),
+                loading = busy,
+            )
+            if (list.isNotEmpty()) TextButton(onClick = { creating = false }) { Text("Choose an existing highlight") }
+        }
+        error?.let { Text(it, color = Dheu.colors.danger, modifier = Modifier.padding(top = 8.dp)) }
     }
 }

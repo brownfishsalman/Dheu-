@@ -63,6 +63,7 @@ import com.salmansaadiq.dheu.data.Posts
 import com.salmansaadiq.dheu.data.friendly
 import com.salmansaadiq.dheu.ui.LocalAppState
 import com.salmansaadiq.dheu.ui.components.Avatar
+import com.salmansaadiq.dheu.ui.components.MentionText
 import com.salmansaadiq.dheu.ui.components.ConfirmDialog
 import com.salmansaadiq.dheu.ui.components.DheuSheet
 import com.salmansaadiq.dheu.ui.components.SheetAction
@@ -165,13 +166,10 @@ fun PostCard(post: Post, onDeleted: () -> Unit, detail: Boolean = false) {
             if (post.caption.isNotBlank()) {
                 val long = post.caption.length > 140
                 val shown = if (!expanded && long) post.caption.take(140).trimEnd() + "…" else post.caption
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(author.username) }
-                        append("  ")
-                        append(shown)
-                        if (long && !expanded) withStyle(SpanStyle(color = c.inkMuted)) { append(" more") }
-                    },
+                MentionText(
+                    shown,
+                    prefix = author.username,
+                    suffix = if (long && !expanded) " more" else null,
                     modifier = if (long && !expanded) Modifier.clickable { expanded = true } else Modifier,
                 )
             }

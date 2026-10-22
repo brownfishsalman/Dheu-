@@ -14,6 +14,7 @@ import com.salmansaadiq.dheu.data.ConversationInfo
 import com.salmansaadiq.dheu.data.Images
 import com.salmansaadiq.dheu.data.Message
 import com.salmansaadiq.dheu.data.Person
+import com.salmansaadiq.dheu.data.VoiceClip
 import com.salmansaadiq.dheu.data.friendly
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -95,6 +96,15 @@ class ChatViewModel(private val conversationId: String, private val me: String) 
         learnNames(listOf(full))
         if (messages.none { it.id == id }) messages = messages + full
         if (full.senderId != me) markRead()
+        // "Rafi renamed the group", "Tania added Salman": refresh the name and the members.
+        if (full.isSystem) refreshInfo()
+    }
+
+    private suspend fun refreshInfo() {
+        runCatching { Chat.conversation(conversationId, me) }.getOrNull()?.let { fresh ->
+            info = fresh
+            people = people + fresh.members.associateBy { it.id }
+        }
     }
 
     /**
@@ -142,14 +152,14 @@ class ChatViewModel(private val conversationId: String, private val me: String) 
     }
 
     /** Returns true when sent (so the composer can clear). */
-    fun send(context: Context, body: String, photo: Uri?, replyTo: Message?, onDone: (Boolean) -> Unit) {
+    fun send(context: Context, body: String, photo: Uri?, replyTo: Message?, voice: VoiceClip?, onDone: (Boolean) -> Unit) {
         if (sending) return
         sending = true
         error = null
         viewModelScope.launch {
             try {
                 val encoded = photo?.let { Images.encode(context, it, Images.POST) }
-                val sent = Chat.send(conversationId, me, body.trim(), encoded, replyTo?.id)
+                val sent = Chat.send(conversationId, me, body.trim(), encoded, replyTo?.id, voice)
                 if (messages.none { it.id == sent.id }) messages = messages + sent
                 markRead()
                 onDone(true)

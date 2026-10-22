@@ -130,6 +130,12 @@ data class Story(
 
 data class StoryGroup(val author: Person, val stories: List<Story>, val allSeen: Boolean, val latestAt: String)
 
+data class HighlightSummary(val id: String, val title: String, val coverPath: String?, val count: Int)
+
+data class HighlightDetail(val id: String, val title: String, val owner: Person, val stories: List<Story>)
+
+const val HIGHLIGHT_TITLE_MAX = 30
+
 // ---- activity ---------------------------------------------------------------------
 
 @Serializable
@@ -140,11 +146,18 @@ data class NotificationRow(
     @SerialName("created_at") val createdAt: String,
     @SerialName("post_id") val postId: String? = null,
     @SerialName("story_id") val storyId: String? = null,
+    // A mention in a group chat (0020): the message and the group's name.
+    @SerialName("conversation_id") val conversationId: String? = null,
     val actor: Person? = null,
     val post: NotificationPost? = null,
     val comment: NotificationComment? = null,
     val story: NotificationStory? = null,
+    val message: NotificationComment? = null,
+    val conversation: NotificationGroup? = null,
 )
+
+@Serializable
+data class NotificationGroup(val title: String? = null)
 
 @Serializable
 data class NotificationPost(val images: List<PostImage> = emptyList())

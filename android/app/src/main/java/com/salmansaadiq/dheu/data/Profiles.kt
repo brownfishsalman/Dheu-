@@ -6,6 +6,8 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.ktor.http.ContentType
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -68,7 +70,7 @@ object Profiles {
         return Relationships(following, requested)
     }
 
-    suspend fun search(query: String): List<Person> {
+    suspend fun search(query: String, limit: Long = 30): List<Person> {
         val q = query.trim().replace(Regex("[%_,()]"), "")
         return client.from("profiles").select(Columns.raw(PERSON)) {
             if (q.isNotEmpty()) {
@@ -80,8 +82,25 @@ object Profiles {
                 }
             }
             order("username", Order.ASCENDING)
-            limit(30)
+            limit(limit)
         }.decodeList()
+    }
+
+    /**
+     * "Suggested for you": the admin's picks in their order, leaving out me, people
+     * I follow or have asked to follow, and people I blocked (as on the website).
+     */
+    suspend fun suggestions(me: String, limit: Int = 10): List<Person> = coroutineScope {
+        val picks = async {
+            client.from("suggested_people").select(Columns.raw("profile:profiles!suggested_people_user_id_fkey($PERSON)")) {
+                order("position", Order.ASCENDING)
+                limit(50)
+            }.decodeList<PersonRow>().mapNotNull { it.profile }
+        }
+        val rel = async { relationships(me) }
+        val blocked = async { blocked(me).map { it.id } }
+        val skip = setOf(me) + rel.await().following + rel.await().requested + blocked.await()
+        picks.await().filter { it.id !in skip }.take(limit)
     }
 
     /** Instant for public accounts, a request for private ones (follow_user decides). */

@@ -9,11 +9,15 @@ import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import com.salmansaadiq.dheu.data.LiveConnection
+import com.salmansaadiq.dheu.data.Push
+import com.salmansaadiq.dheu.push.Notifications
 
 class DheuApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         LiveConnection.install()
+        Push.init(this)
+        Notifications.createChannels(this)
     }
 
     // Photos sit at unique, never-rewritten paths, so a generous disk cache is safe.

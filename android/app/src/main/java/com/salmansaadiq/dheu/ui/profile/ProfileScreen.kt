@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,9 +46,11 @@ import com.salmansaadiq.dheu.data.Backend
 import com.salmansaadiq.dheu.data.Buckets
 import com.salmansaadiq.dheu.data.FollowState
 import com.salmansaadiq.dheu.data.GridPost
+import com.salmansaadiq.dheu.data.HighlightSummary
 import com.salmansaadiq.dheu.data.Profile
 import com.salmansaadiq.dheu.data.ProfileStats
 import com.salmansaadiq.dheu.data.Profiles
+import com.salmansaadiq.dheu.data.Stories
 import com.salmansaadiq.dheu.data.friendly
 import com.salmansaadiq.dheu.ui.Load
 import com.salmansaadiq.dheu.ui.LocalAppState
@@ -71,12 +74,18 @@ import com.salmansaadiq.dheu.ui.nav.FollowListRoute
 import com.salmansaadiq.dheu.ui.nav.LocalNav
 import com.salmansaadiq.dheu.ui.nav.SettingsRoute
 import com.salmansaadiq.dheu.ui.rememberLoader
+import com.salmansaadiq.dheu.ui.stories.HighlightsRow
 import com.salmansaadiq.dheu.ui.theme.Dheu
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-private class ProfileData(val profile: Profile?, val stats: ProfileStats, val posts: List<GridPost>)
+private class ProfileData(
+    val profile: Profile?,
+    val stats: ProfileStats,
+    val posts: List<GridPost>,
+    val highlights: List<HighlightSummary> = emptyList(),
+)
 
 @Composable
 fun ProfileScreen(username: String, isTab: Boolean = false) {
@@ -84,12 +93,15 @@ fun ProfileScreen(username: String, isTab: Boolean = false) {
     val loader = rememberLoader("profile-$username") {
         val profile = Profiles.byUsername(username) ?: return@rememberLoader ProfileData(null, ProfileStats(), emptyList())
         coroutineScope {
-            // Posts load alongside the stats: RLS returns them only to people allowed to see them.
+            // Posts and highlights load alongside the stats: RLS returns them only to people allowed to see them.
             val stats = async { Profiles.stats(profile.id) }
             val posts = async { Profiles.gridPosts(profile.id) }
-            ProfileData(profile, stats.await(), posts.await())
+            val highlights = async { Stories.highlights(profile.id) }
+            ProfileData(profile, stats.await(), posts.await(), highlights.await())
         }
     }
+    // Back on the profile (after a new highlight, a post, a follow elsewhere): catch up quietly.
+    LaunchedEffect(Unit) { if (loader.state is Load.Ready) loader.reload(silent = true) }
     val state = loader.state
     val profile = (state as? Load.Ready)?.value?.profile
     val app = LocalAppState.current
@@ -194,6 +206,7 @@ private fun ProfileBody(data: ProfileData, onChanged: () -> Unit) {
                 }
             }
         }
+        if (canSee) item(span = { GridItemSpan(maxLineSpan) }) { HighlightsRow(data.highlights, isOwner = isMe) }
         item(span = { GridItemSpan(maxLineSpan) }) { HorizontalDivider(color = c.line) }
 
         if (!canSee) {

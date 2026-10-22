@@ -150,47 +150,6 @@ Vercel's functions are pinned to the database's region (`vercel.json`), which on
 
 About 11,100 lines of TypeScript, 8,700 of Kotlin and 2,600 of SQL (25 tables, 69 RLS policies, 20 triggers, 51 functions). The website has ten runtime dependencies.
 
-## Running it yourself
-
-```bash
-git clone https://github.com/brownfishsalman/Dheu-Social-Media.git
-cd Dheu-Social-Media
-npm install
-cp .env.example .env.local   # fill in your Supabase URL + keys
-npm run dev
-```
-
-Then create a free Supabase project, run the files in `supabase/migrations/` in order in its SQL editor, and turn off "Confirm email" under Authentication. The first account to sign up becomes the admin. The [owner's guide](docs/OWNER-GUIDE.md) has full step-by-step instructions, including deploying to Vercel and day-to-day administration. To build the Android app against your own project, follow [android/README.md](android/README.md).
-
-## Project layout
-
-```
-src/app/(auth)/            login & sign-up (server actions)
-src/app/(app)/             everything behind login: feed, profiles, posts, stories,
-                           highlights, messages, activity, settings, admin
-src/app/api/auth/signup/   sign-up for the Android app (the invite check needs the secret key)
-src/app/api/invites/       invite codes for the Android app (Bearer token)
-src/app/api/cron/cleanup/  nightly expiry job
-src/app/api/push/          receives database webhooks, sends Web Push and app push
-src/lib/push.ts            sending · src/lib/fcm.ts Firebase · src/lib/push-client.ts subscribe · public/sw.js
-src/lib/mentions.ts        reading @mentions (the database and the app use the same rule)
-src/proxy.ts               session refresh + login gate (runs on every request)
-src/components/            UI: post/ story/ chat/ activity/ profile/ admin/ nav/ ui/ brand/
-src/lib/data/              server-only query functions
-src/lib/supabase/          browser / server / admin clients, realtime auth helper
-src/lib/images.ts          browser-side image pipeline
-supabase/migrations/       schema, RLS policies, triggers, storage buckets
-scripts/build-logo.mjs     regenerates icons from the original logo artwork
-android/                   the native Android app (see android/README.md)
-```
-
-## Design notes
-
-- It's sized for free tiers: about 50 members and 1 GB of images. Resizing to 1080 px and expiring posts after 3 months keeps storage within that.
-- Image URLs are public. Files sit at unguessable paths in public buckets instead of behind signed URLs, a deliberate trade-off for simplicity in a trusted community.
-- There's no email. Free-tier SMTP can't reach arbitrary addresses, so sign-up needs no confirmation and password resets go through the admin.
-- The repo holds no secrets. The push webhook secret lives in Supabase Vault and Vercel environment variables, and the committed migration has placeholders. The Android build reads its Supabase URL and publishable key from an uncommitted `local.properties`.
-- Side effects fail safely. The push webhook trigger catches its own errors, so a notification problem can never block a like or a message.
 
 ## License
 
